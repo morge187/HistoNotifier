@@ -1,5 +1,14 @@
-from .start import start as start_coomand
+from .start import start as start
+from .admin_create import admin_create
+from .usercommands import user
+from .admin import admin
+from .events import events_router
+from .change_event import admin_edit_router
+from .reward import reward_router
+from .tank import tank_router
 
-handlers = [start_coomand]
+handlers = [start, admin_create, user,
+            admin, events_router, admin_edit_router,
+            reward_router, tank_router]
 
 __all__ = ["handlers"]
