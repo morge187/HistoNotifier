@@ -6,8 +6,6 @@ from handlers import handlers
 load_dotenv()
 
 from aiogram import Bot, Dispatcher
-from handlers.admin import admin
-
 from database.models import async_main
 
 async def main():
@@ -16,7 +14,7 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     for router in handlers:
         dp.include_router(router)
-    dp.startup.register(startup)
+    dp.startup.register(startup) 
     await dp.start_polling(bot)
 
 async def startup(dispatcher: Dispatcher): # !!!

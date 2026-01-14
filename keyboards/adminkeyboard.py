@@ -3,7 +3,8 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 adminboard = ReplyKeyboardMarkup(keyboard=[
     [
         KeyboardButton(text='Мои кадры'),
-        KeyboardButton(text='Правила')
+        KeyboardButton(text='Правила'),
+        KeyboardButton(text='матч-штрафы')
     ],
     [
         KeyboardButton(text='Поменять имя'),

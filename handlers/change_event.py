@@ -276,7 +276,6 @@ async def finish_editing(message: Message, state: FSMContext):
             f"🎉 Событие успешно обновлено!\n\n"
             f"🆔 ID: {updated_event.id}\n"
             f"📌 Название: {updated_event.name}\n"
-            f"📝 Описание: {updated_event.discription}\n"
             f"📅 Дата и время: {updated_event.time.strftime('%d.%m.%Y %H:%M')}\n"
             f"🏆 Очков за посещение: {updated_event.cost}\n"
             f"🖼️ Картинка: обновлена\n\n"
@@ -287,6 +286,7 @@ async def finish_editing(message: Message, state: FSMContext):
             photo=updated_event.photo_id,
             caption=new_card
         )
+        await message.answer(f"📝 Описание: {updated_event.discription}\n")
         
         # Предлагаем дальнейшие действия
         keyboard = InlineKeyboardBuilder()

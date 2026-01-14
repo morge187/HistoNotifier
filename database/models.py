@@ -20,6 +20,7 @@ class User(Base):
     tg_id = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(nullable=True)
     points: Mapped[int] = mapped_column(nullable=True, default=0)
+    fine: Mapped[str] = mapped_column()
 
 
 class UserEvent(Base):
@@ -35,7 +36,18 @@ class Tank(Base):
     discript: Mapped[str] = mapped_column() 
     photo_id = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column()
+    tank_type: Mapped[str] = mapped_column()
     nation: Mapped[str] = mapped_column()
+    
+    years_rel = relationship("YearTank", back_populates="tank", cascade="all, delete-orphan")
+
+class YearTank(Base):
+    __tablename__ = "yeartanks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tank_id: Mapped[int] = mapped_column(ForeignKey("tanks.id", ondelete="CASCADE"))
+    year: Mapped[int] = mapped_column()
+    
+    tank = relationship("Tank", back_populates="years_rel")
 
 
 class Event(Base):
@@ -49,7 +61,7 @@ class Event(Base):
 
 
 class Reward(Base):
-    __tablename__ = 'rewards'  # Изменили на 'rewards' вместо 'rewardings'
+    __tablename__ = 'rewards'
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=True)
@@ -64,7 +76,7 @@ class UserReward(Base):
     __tablename__ = 'userrewards'
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    reward_id: Mapped[int] = mapped_column(ForeignKey('rewards.id'))  # Исправлено: rewards вместо rewardings
+    reward_id: Mapped[int] = mapped_column(ForeignKey('rewards.id'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 

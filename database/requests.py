@@ -1,8 +1,9 @@
 from sqlalchemy import select, update, delete, desc
 from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, func
 from datetime import datetime
 
-from database.models import User, UserEvent, Event, async_session, Reward, UserReward, Tank # Импорты модели User и асинхронной сессии
+from database.models import User, UserEvent, Event, async_session, Reward, UserReward, Tank, YearTank # Импорты модели User и асинхронной сессии
 
 async def get_user(tg_id):
     async with async_session() as session: # Открываем асинхронную сессию
@@ -33,15 +34,14 @@ async def set_user(tg_id): # Асинхронная функция для раб
 async def set_status(tg_id, status, points=0): # Поскольку мы изменяем статус конкретного юзера по его tg_id, то этот параметр обязателен.
     async with async_session() as session:
         user = await session.scalar(select(User).where(User.tg_id == tg_id))
-        if user: # Проверка существования пользователя
-            user.status = status # Изменение статуса пользователя
+        if user:
+            user.status = status 
             user.points = (user.points if user.points else 0) + points
             await session.commit()
 
 
 async def save_event(data: dict):
     async with async_session() as session:
-        # Убираем проверку по id, так как он всегда -1 при создании
         event = Event(
             name=data['name'], 
             photo_id=data['image_file_id'], 
@@ -51,20 +51,37 @@ async def save_event(data: dict):
         )
         session.add(event)
         await session.commit()
-        return event  # Возвращаем созданное событие
+        return event
     
 
-async def get_events(dateTime):
+async def get_events():
     async with async_session() as session:
-        events = await session.scalar(select(Event).where(Event.time >= dateTime))
+        events = await session.scalars(
+            select(Event)
+            .order_by(Event.time)
+        )
+        return events.all()
+    
+from sqlalchemy.ext.asyncio import AsyncSession
 
-        return events
+from database.models import Event
 
-# ... существующие функции ...
+
+async def create_event(session: AsyncSession, name: str, time, cost: int, discription: str, photo_id: int):
+    event = Event(
+        name=name,
+        time=time,
+        cost=cost,
+        discription=discription,
+        photo_id=photo_id,
+    )
+    session.add(event)
+    await session.commit()
+    return event
+
 
 async def get_future_events():
     async with async_session() as session:
-        # Используем scalars для получения списка, а не одного значения
         events = await session.scalars(
             select(Event)
             .where(Event.time >= datetime.now())
@@ -86,20 +103,19 @@ async def get_event_by_index(index: int):
             select(Event)
             .where(Event.time >= datetime.now())
             .order_by(Event.time)
-            .offset(index - 1)  # -1 т.к. нумерация с 1
+            .offset(index - 1)
             .limit(1)
         )
         return events.first()
 
 async def add_user_to_event(user_id: int, event_id: int):
     async with async_session() as session:
-        # Проверяем, не записан ли уже пользователь
         existing = await session.scalar(
             select(UserEvent)
             .where(UserEvent.user_id == user_id, UserEvent.event_id == event_id)
         )
         if existing:
-            return False  # Уже записан
+            return False
         
         session.add(UserEvent(user_id=user_id, event_id=event_id))
         await session.commit()
@@ -146,7 +162,6 @@ async def update_event(event_id: int, update_data: dict):
         if not event:
             return False
         
-        # Обновляем только переданные поля
         if 'name' in update_data:
             event.name = update_data['name']
         if 'description' in update_data:
@@ -191,7 +206,6 @@ async def delete_event_by_id(event_id: int) -> bool:
             if not event:
                 return False
            
-            # 2. Удаляем связи пользователей с этим ивентом (если есть таблица UserEvent)
             try:
                 await session.execute(
                     delete(UserEvent).where(UserEvent.event_id == event_id)
@@ -199,17 +213,15 @@ async def delete_event_by_id(event_id: int) -> bool:
             except Exception as e:
                 pass
             
-            # 3. Удаляем сам ивент
             await session.execute(
                 delete(Event).where(Event.id == event_id)
             )
-            
-            # 4. Коммитим изменения
+
             await session.commit()
             
             return True
             
-        except Exception as e:
+        except Exception:
             await session.rollback()
             return False
 
@@ -227,9 +239,6 @@ async def create_reward(name: str, description: str, gift_link: str, price: int,
             session.add(reward)
             await session.commit()
             return True
-        #except Exception as e:
-        #    await session.rollback()
-        #    return False
 
 async def get_all_rewards(active_only: bool = False):
     async with async_session() as session:
@@ -274,7 +283,7 @@ async def update_reward(reward_id: int, **kwargs):
             
             await session.commit()
             return True
-        except Exception as e:
+        except Exception:
             await session.rollback()
             return False
 
@@ -286,14 +295,13 @@ async def delete_reward(reward_id: int) -> bool:
             )
             await session.commit()
             return True
-        except Exception as e:
+        except Exception:
             await session.rollback()
             return False
 
 async def assign_reward_to_user(user_id: int, reward_id: int) -> bool:
     async with async_session() as session:
         try:
-            # Проверяем, не получил ли пользователь уже эту награду
             existing = await session.execute(
                 select(UserReward)
                 .where(UserReward.user_id == user_id, UserReward.reward_id == reward_id)
@@ -326,10 +334,8 @@ async def is_admin(user_id: int) -> bool:
 async def reset_rewards():
     async with async_session() as session:
         try:
-            # Удаляем все связи пользователей с наградами
             await session.execute(delete(UserReward))
             
-            # Активируем все награды
             await session.execute(
                 update(Reward).values(is_active=True)
             )
@@ -397,19 +403,26 @@ async def get_tank_by_id(tank_id: int):
         )
         return result.scalar_one_or_none()
 
-async def create_tank(name: str, nation: str, discript: str, photo_id: str) -> bool:
+async def create_tank(name: str, nation: str, discript: str, photo_id: str, tank_type: str, years: list) -> bool:
     async with async_session() as session:
         try:
             tank = Tank(
                 name=name,
                 nation=nation,
                 discript=discript,
-                photo_id=photo_id
+                photo_id=photo_id,
+                tank_type=tank_type,
             )
             session.add(tank)
+            await session.flush()
+            
+            for year in years:
+                year_tank = YearTank(tank_id=tank.id, year=year)
+                session.add(year_tank)
+            
             await session.commit()
             return True
-        except Exception as e:
+        except Exception:
             await session.rollback()
             return False
 
@@ -425,12 +438,29 @@ async def update_tank(tank_id: int, **kwargs) -> bool:
                 return False
             
             for key, value in kwargs.items():
-                if hasattr(tank, key):
+                if hasattr(tank, key) and key != 'years':  # Годы обрабатываем отдельно
                     setattr(tank, key, value)
             
             await session.commit()
             return True
-        except Exception as e:
+        except Exception:
+            await session.rollback()
+            return False
+        
+async def update_tank_years(tank_id: int, years: list) -> bool:
+    async with async_session() as session:
+        try:
+            await session.execute(
+                delete(YearTank).where(YearTank.tank_id == tank_id)
+            )
+            
+            for year in years:
+                year_tank = YearTank(tank_id=tank_id, year=year)
+                session.add(year_tank)
+            
+            await session.commit()
+            return True
+        except Exception:
             await session.rollback()
             return False
 
@@ -442,9 +472,30 @@ async def delete_tank(tank_id: int) -> bool:
             )
             await session.commit()
             return True
-        except Exception as e:
+        except Exception:
             await session.rollback()
             return False
+        
+async def delete_tank_years(tank_id: int) -> bool:
+    async with async_session() as session:
+        try:
+            await session.execute(
+                delete(YearTank).where(YearTank.tank_id == tank_id)
+            )
+            await session.commit()
+            return True
+        except Exception:
+            await session.rollback()
+            return False
+        
+async def get_tank_years(tank_id: int) -> list:
+    async with async_session() as session:
+        result = await session.execute(
+            select(YearTank.year)
+            .where(YearTank.tank_id == tank_id)
+            .order_by(YearTank.year)
+        )
+        return [row[0] for row in result.all()]
 
 async def get_all_nations():
     async with async_session() as session:
@@ -452,3 +503,171 @@ async def get_all_nations():
             select(Tank.nation).distinct().order_by(Tank.nation)
         )
         return [row[0] for row in result.all()]
+    
+async def get_all_years():
+    async with async_session() as session:
+        result = await session.execute(
+            select(YearTank.year)
+            .distinct()
+            .order_by(YearTank.year.desc())
+        )
+        return [row[0] for row in result.all()]
+
+async def get_tanks_by_year(year: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Tank)
+            .join(YearTank, Tank.id == YearTank.tank_id)
+            .where(YearTank.year == year)
+            .order_by(Tank.name)
+        )
+        return result.scalars().all()
+
+async def get_tanks_by_year_and_type(year: int, tank_type: str):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Tank)
+            .join(YearTank, Tank.id == YearTank.tank_id)
+            .where(YearTank.year == year, Tank.tank_type == tank_type)
+            .order_by(Tank.name)
+        )
+        return result.scalars().all()
+
+async def get_tank_types_by_year(year: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Tank.tank_type)
+            .join(YearTank, Tank.id == YearTank.tank_id)
+            .where(YearTank.year == year, Tank.tank_type.isnot(None))
+            .distinct()
+            .order_by(Tank.tank_type)
+        )
+        return [row[0] for row in result.all() if row[0]]
+
+async def get_tank_with_years(tank_id: int):
+    async with async_session() as session:
+        tank_result = await session.execute(
+            select(Tank).where(Tank.id == tank_id)
+        )
+        tank = tank_result.scalar_one_or_none()
+        
+        if not tank:
+            return None
+        
+        years_result = await session.execute(
+            select(YearTank.year)
+            .where(YearTank.tank_id == tank_id)
+            .order_by(YearTank.year)
+        )
+        years = [row[0] for row in years_result.all()]
+        
+        return tank, years
+    
+async def get_users_with_fines():
+    async with async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(
+                and_(
+                    User.name.isnot(None),
+                    User.fine.isnot(None),
+                    func.length(func.trim(User.fine)) > 0
+                )
+            )
+            .order_by(User.name)
+        )
+        return result.scalars().all()
+
+async def get_users_with_fines():
+    async with async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(
+                and_(
+                    User.name.isnot(None),
+                    User.fine.isnot(None),
+                    func.length(func.trim(User.fine)) > 0
+                )
+            )
+            .order_by(User.name)
+        )
+        return result.scalars().all()
+
+async def get_users_with_fines_by_event(event_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(User)
+            .join(UserEvent, User.id == UserEvent.user_id)
+            .where(
+                and_(
+                    UserEvent.event_id == event_id,
+                    User.name.isnot(None),
+                    User.fine.isnot(None),
+                    func.length(func.trim(User.fine)) > 0
+                )
+            )
+            .order_by(User.name)
+        )
+        return result.scalars().all()
+
+async def get_user_by_name(name: str):
+    async with async_session() as session:
+        return await session.scalar(
+            select(User).where(func.lower(User.name) == func.lower(name))
+        )
+
+async def get_all_users_ordered():
+    async with async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(User.status != "admin")
+            .order_by(User.name)
+        )
+        return result.scalars().all()
+
+async def set_user_fine(user_id: int, fine_text: str):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if not user:
+            return False
+        user.fine = fine_text
+        await session.commit()
+        return True
+
+async def clear_user_fine(user_id: int):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if not user:
+            return False
+        user.fine = None
+        await session.commit()
+        return True
+
+async def set_user_points_value(user_id: int, value: int):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if not user:
+            return False
+        user.points = max(0, int(value))
+        await session.commit()
+        return True
+
+async def decrease_user_points(user_id: int, delta: int):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if not user:
+            return False
+        current = user.points or 0
+        user.points = max(0, current - int(delta))
+        await session.commit()
+        return True
+
+async def reset_user_points(user_id: int):
+    return await set_user_points_value(user_id, 0)
+
+async def check_name_exists(name: str, exclude_user_id: int = None):
+    async with async_session() as session:
+        query = select(User).where(func.lower(User.name) == func.lower(name))
+        if exclude_user_id:
+            query = query.where(User.id != exclude_user_id)
+        return await session.scalar(query) is not None

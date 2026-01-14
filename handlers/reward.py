@@ -768,7 +768,7 @@ async def refill_reward_command(message: Message, state: FSMContext):
     for i, reward in enumerate(inactive_rewards, 1):
         rewards_list += f"{i}. 🆔 {reward.id} | {reward.name}\n"
         rewards_list += f"   💰 {reward.price} очков\n"
-        rewards_list += f"   🔗 Текущая ссылка: {reward.gift_link[:50]}...\n\n"
+        rewards_list += f"   🔗 Текущая ссылка: {reward.gift_link}...\n\n"
     
     rewards_list += "Введите номер награды для пополнения (или 'отмена' для отмены):"
     
