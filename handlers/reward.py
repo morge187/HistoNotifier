@@ -502,30 +502,31 @@ async def show_rewards_command(message: Message):
         
         # Показываем первую награду из группы как пример
         if rewards_list:
-            example_reward = rewards_list[0]
-            can_afford = (user.points or 0) >= price
-            
-            # Создаем клавиатуру для каждой цены
-            keyboard = InlineKeyboardBuilder()
-            if can_afford:
-                keyboard.add(InlineKeyboardButton(
-                    text=f"🎁 Получить ({price} очков)", 
-                    callback_data=f"get_reward_{price}"
-                ))
-            else:
-                keyboard.add(InlineKeyboardButton(
-                    text=f"❌ Недостаточно очков ({price} очков)", 
-                    callback_data="not_enough_points"
-                ))
-            
-            await message.answer_photo(
-                photo=example_reward.image_file_id,
-                caption=f"🎁 {example_reward.name}\n"
-                       f"📝 {example_reward.description}\n"
-                       f"💰 {price} очков\n\n"
-                       f"{'✅ У вас достаточно очков!' if can_afford else '❌ У вас недостаточно очков'}",
-                reply_markup=keyboard.as_markup()
-            )
+            for reward in rewards_list:
+                example_reward = reward
+                can_afford = (user.points or 0) >= price
+                
+                # Создаем клавиатуру для каждой цены
+                keyboard = InlineKeyboardBuilder()
+                if can_afford:
+                    keyboard.add(InlineKeyboardButton(
+                        text=f"🎁 Получить ({price} очков)", 
+                        callback_data=f"get_reward_{price}"
+                    ))
+                else:
+                    keyboard.add(InlineKeyboardButton(
+                        text=f"❌ Недостаточно очков ({price} очков)", 
+                        callback_data="not_enough_points"
+                    ))
+                
+                await message.answer_photo(
+                    photo=example_reward.image_file_id,
+                    caption=f"🎁 {example_reward.name}\n"
+                        f"📝 {example_reward.description}\n"
+                        f"💰 {price} очков\n\n"
+                        f"{'✅ У вас достаточно очков!' if can_afford else '❌ У вас недостаточно очков'}",
+                    reply_markup=keyboard.as_markup()
+                )
     
     # Показываем награды пользователя
     user_rewards = await get_user_rewards(user.id)
