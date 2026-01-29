@@ -244,7 +244,6 @@ async def tanks_by_nation_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-
 # Обработка выбора нации
 @user.callback_query(F.data.startswith("nation_"))
 async def process_nation_choice(callback: CallbackQuery, state: FSMContext):
@@ -350,7 +349,8 @@ async def process_tank_type_choice(callback: CallbackQuery, state: FSMContext):
         current_page=0
     )
 
-    await show_tanks_list(callback.message, filtered_tanks, nation, "tanks_by_nation", type_label)
+    # ✅ ИСПРАВЛЕНО: Кнопка "Назад" теперь ведет на выбор типа
+    await show_tanks_list(callback.message, filtered_tanks, nation, f"nation_{nation_idx}", type_label)
     await callback.answer()
 
 async def show_tanks_list(message: Message, tanks, nation, back_callback="tanks", type_label=""):
@@ -827,171 +827,7 @@ async def process_tank_image_invalid(message: Message):
     await message.answer("⚠️ Пожалуйста, отправьте фотографию танка:")
 
 
-# Добавить танк
-@user.message(F.text == "Добавить танк")
-@user.message(Command('add_tank'))
-async def start_add_tank(message: Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        await message.answer("❌ У вас нет прав для добавления танков!")
-        return
-    
-    await message.answer(
-        "🎖️ <b>Добавление нового танка</b>\n\n"
-        "📝 Шаг 1/6: Введите название танка:\n"
-        "<i>Пример: Т-34, Тигр I, Шерман M4</i>",
-        parse_mode="HTML"
-    )
-    await state.set_state(TankStates.waiting_tank_name)
-
-@user.message(TankStates.waiting_tank_name)
-async def process_tank_name(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    await state.update_data(name=message.text.strip())
-    
-    await message.answer(
-        "✅ Название сохранено!\n\n"
-        "🌍 Шаг 2/6: Введите нацию танка:\n"
-        "<i>Пример: СССР, Германия, США, Великобритания</i>",
-        parse_mode="HTML"
-    )
-    await state.set_state(TankStates.waiting_tank_nation)
-
-@user.message(TankStates.waiting_tank_nation)
-async def process_tank_nation(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    await state.update_data(nation=message.text.strip())
-    
-    await message.answer(
-        "✅ Нация сохранена!\n\n"
-        "🔰 Шаг 3/6: Введите тип/класс танка:\n"
-        "<i>Пример: Средний танк, Тяжелый танк, ПТ-САУ, САУ</i>",
-        parse_mode="HTML"
-    )
-    await state.set_state(TankStates.waiting_tank_type)
-
-@user.message(TankStates.waiting_tank_type)
-async def process_tank_type(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    await state.update_data(tank_type=message.text.strip())
-    
-    await message.answer(
-        "✅ Тип сохранен!\n\n"
-        "📅 Шаг 4/6: Введите годы создания танка через запятую:\n"
-        "<i>Пример: 1939, 1940, 1941</i>\n"
-        "<i>Или один год: 1942</i>",
-        parse_mode="HTML"
-    )
-    await state.set_state(TankStates.waiting_tank_years)
-
-@user.message(TankStates.waiting_tank_years)
-async def process_tank_years(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    years_input = message.text.strip()
-    
-    # Проверяем и парсим годы
-    try:
-        years_list = [y.strip() for y in years_input.split(',')]
-        valid_years = []
-        
-        for year_str in years_list:
-            if not year_str:
-                continue
-            year = int(year_str)
-            if 1900 <= year <= datetime.now().year:
-                valid_years.append(year)
-            else:
-                await message.answer(
-                    f"⚠️ Год {year} некорректен. Годы должны быть от 1900 до {datetime.now().year}.\n"
-                    "Пожалуйста, введите годы через запятую еще раз:"
-                )
-                return
-        
-        if not valid_years:
-            await message.answer("⚠️ Не указано ни одного корректного года. Введите годы через запятую:")
-            return
-        
-        # Убираем дубликаты и сортируем
-        valid_years = sorted(list(set(valid_years)))
-        
-        await state.update_data(years=valid_years)
-        
-        await message.answer(
-            f"✅ Годы сохранены: {', '.join(map(str, valid_years))}\n\n"
-            "📄 Шаг 5/6: Введите описание танка:",
-            parse_mode="HTML"
-        )
-        await state.set_state(TankStates.waiting_tank_description)
-        
-    except ValueError:
-        await message.answer("⚠️ Пожалуйста, введите годы цифрами через запятую (например: 1939, 1940, 1941):")
-        return
-
-@user.message(TankStates.waiting_tank_description)
-async def process_tank_description(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    await state.update_data(discript=message.text.strip())
-    
-    await message.answer(
-        "✅ Описание сохранено!\n\n"
-        "🖼️ Шаг 6/6: Отправьте фотографию танка:",
-        parse_mode="HTML"
-    )
-    await state.set_state(TankStates.waiting_tank_image)
-
-@user.message(TankStates.waiting_tank_image, F.photo)
-async def process_tank_image(message: Message, state: FSMContext):
-    if message.text == "отмена":
-        await state.set_state(TankStates.nothing)
-        return
-    photo_id = message.photo[-1].file_id
-    data = await state.get_data()
-    
-    success = await create_tank(
-        name=data['name'],
-        nation=data['nation'],
-        discript=data['discript'],
-        photo_id=photo_id,
-        tank_type=data["tank_type"],
-        years=data["years"]  # Теперь это список
-    )
-    
-    if success:
-        await message.answer_photo(
-            photo=photo_id,
-            caption=(
-                "✅ <b>Танк успешно добавлен!</b>\n\n"
-                f"🎖️ <b>Название:</b> {data['name']}\n"
-                f"🇺🇳 <b>Нация:</b> {data['nation']}\n"
-                f"🔰 <b>Тип:</b> {data.get('tank_type', 'Не указан')}\n"
-                f"📅 <b>Годы:</b> {', '.join(map(str, data['years']))}\n"
-                f"📝 <b>Описание:</b>\n{data['discript']}"
-            ),
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer(
-            "❌ <b>Не удалось добавить танк.</b>\n"
-            "Попробуйте снова или обратитесь к администратору.",
-            parse_mode="HTML"
-        )
-    
-    await state.clear()
-
-@user.message(TankStates.waiting_tank_image)
-async def process_tank_image_invalid(message: Message):
-    await message.answer("⚠️ Пожалуйста, отправьте фотографию танка:")
-
-
+# Изменить танк
 @user.message(F.text == "Изменить танк")
 @user.message(Command('edit_tank'))
 async def start_edit_tank(message: Message, state: FSMContext):
@@ -1341,7 +1177,6 @@ async def process_next_edit_step(message: Message, state: FSMContext, next_choic
     elif next_choice == 6:
         await message.answer("🖼️ Отправьте новую фотографию танка:")
         await state.set_state(TankStates.waiting_new_image)
-
 
 
 # Удаление танка
