@@ -67,17 +67,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import Event
 
 
-async def create_event(session: AsyncSession, name: str, time, cost: int, discription: str, photo_id: int):
-    event = Event(
-        name=name,
-        time=time,
-        cost=cost,
-        discription=discription,
-        photo_id=photo_id,
-    )
-    session.add(event)
-    await session.commit()
-    return event
+async def create_event(name: str, time, cost: int, discription: str, photo_id: int):
+    async with async_session() as session:
+        event = Event(
+            name=name,
+            time=time,
+            cost=cost,
+            discription=discription,
+            photo_id=photo_id,
+        )
+        session.add(event)
+        await session.commit()
+        return event
 
 
 async def get_future_events():
@@ -671,3 +672,7 @@ async def check_name_exists(name: str, exclude_user_id: int = None):
         if exclude_user_id:
             query = query.where(User.id != exclude_user_id)
         return await session.scalar(query) is not None
+
+async def get_user_by_id(user_id: int):
+    async with async_session() as session:
+        return await session.scalar(select(User).where(User.id == user_id))

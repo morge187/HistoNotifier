@@ -1,0 +1,11 @@
+services:
+  bot-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks: [isolated]
+networks:
+  isolated:
+    internal: false
+volumes:
+  postgres_data:
