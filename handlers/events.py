@@ -463,7 +463,7 @@ async def add_event_photo(message: Message, state: FSMContext):
     photo_id = message.photo[-1].file_id
     data = await state.get_data()
 
-    event = await create_event(
+    await create_event(
         name=data["name"],
         time=data["time"],
         cost=data["cost"],
@@ -473,19 +473,22 @@ async def add_event_photo(message: Message, state: FSMContext):
 
     # Отправляем уведомление всем пользователям
     users = await get_all_users()
+    event_id = await get_last_event_id()
     
     event_info = (
-        f"🎯 <b>{event.name}</b>\n\n"
-        f"📅 <b>Дата и время:</b> {event.time.strftime('%d.%m.%Y %H:%M')}\n"
-        f"🏆 <b>Очки за посещение:</b> {event.cost}\n"
-        f"🆔 <b>ID события:</b> {event.id}"
+        f"🎯 <b>{data['name']}</b>\n\n"
+        f"📅 <b>Дата и время:</b> {data['time'].strftime('%d.%m.%Y %H:%M')}\n"
+        f"🏆 <b>Очки за посещение:</b> {data['cost']}\n"
+        f"🆔 <b>ID события:</b> {event_id}"
     )
     
     keyboard = InlineKeyboardBuilder()
-    keyboard.add(InlineKeyboardButton(
-        text="🎯 Участвовать", 
-        callback_data=f"participate:{event.id}"
-    ))
+    # Добавляем кнопку только если событие еще в будущем
+    if data['time'] > datetime.now():
+        keyboard.add(InlineKeyboardButton(
+            text="🎯 Участвовать", 
+            callback_data=f"participate:{event_id}"
+        ))
     
     for user in users:
         try:
