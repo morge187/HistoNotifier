@@ -142,7 +142,9 @@ async def process_event_number(message: Message, state: FSMContext):
         await message.answer_photo(photo=event.photo_id, caption=caption, reply_markup=keyboard.as_markup())
         await message.answer(f"📝 {event.discription}")
     else:
-        keyboard.add(InlineKeyboardButton(text="🎯 Участвовать", callback_data=f"participate:{event.id}"))
+        # Проверяем, не прошло ли время события
+        if event.time > datetime.now():
+            keyboard.add(InlineKeyboardButton(text="🎯 Участвовать", callback_data=f"participate:{event.id}"))
         await message.answer_photo(photo=event.photo_id, caption=caption, reply_markup=keyboard.as_markup(), parse_mode="html")
         await message.answer(f"📝 {event.discription}", parse_mode="html")
         await state.clear()

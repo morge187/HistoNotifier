@@ -167,10 +167,12 @@ async def get_event_image(message: Message, state: FSMContext):
     
     for user in users:
         keyboard = InlineKeyboardBuilder()
-        keyboard.add(InlineKeyboardButton(
-            text="🎯 Участвовать", 
-            callback_data=f"participate:{event_id}"
-        ))
+        # Добавляем кнопку только если событие еще в будущем
+        if data['datetime_obj'] > datetime.now():
+            keyboard.add(InlineKeyboardButton(
+                text="🎯 Участвовать", 
+                callback_data=f"participate:{event_id}"
+            ))
     
         await message.bot.send_photo(
             chat_id=user.tg_id,
