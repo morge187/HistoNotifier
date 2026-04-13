@@ -15,7 +15,7 @@ from database.requests import (
     get_user, get_future_events, get_event_by_id,
     add_user_to_event, get_event_participants, update_user_points,
     get_all_events, delete_event_by_id, get_events,
-    create_event
+    create_event, get_all_users, get_last_event_id
 )
 
 events_router = Router()
@@ -461,7 +461,7 @@ async def add_event_photo(message: Message, state: FSMContext):
     photo_id = message.photo[-1].file_id
     data = await state.get_data()
 
-    await create_event(
+    event = await create_event(
         name=data["name"],
         time=data["time"],
         cost=data["cost"],
@@ -469,5 +469,35 @@ async def add_event_photo(message: Message, state: FSMContext):
         photo_id=photo_id,
     )
 
+    # Отправляем уведомление всем пользователям
+    users = await get_all_users()
+    
+    event_info = (
+        f"🎯 <b>{event.name}</b>\n\n"
+        f"📅 <b>Дата и время:</b> {event.time.strftime('%d.%m.%Y %H:%M')}\n"
+        f"🏆 <b>Очки за посещение:</b> {event.cost}\n"
+        f"🆔 <b>ID события:</b> {event.id}"
+    )
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.add(InlineKeyboardButton(
+        text="🎯 Участвовать", 
+        callback_data=f"participate:{event.id}"
+    ))
+    
+    for user in users:
+        try:
+            await message.bot.send_photo(
+                chat_id=user.tg_id,
+                photo=photo_id,
+                caption=event_info,
+                reply_markup=keyboard.as_markup(),
+                parse_mode="html"
+            )
+        except Exception as e:
+            print(f"Ошибка при отправке уведомления пользователю {user.tg_id}: {e}")
+    
+    await message.answer(f"📝 {data['description']}")
+
     await state.clear()
-    await message.answer("✅ Ивент создан!")
+    await message.answer("✅ Ивент создан и отправлен всем пользователям!")

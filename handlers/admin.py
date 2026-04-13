@@ -169,7 +169,7 @@ async def get_event_image(message: Message, state: FSMContext):
         keyboard = InlineKeyboardBuilder()
         keyboard.add(InlineKeyboardButton(
             text="🎯 Участвовать", 
-            callback_data=f"participate_{event_id}"
+            callback_data=f"participate:{event_id}"
         ))
     
         await message.bot.send_photo(
