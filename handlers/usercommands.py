@@ -1289,18 +1289,33 @@ async def confirm_delete_tank(callback: CallbackQuery, state: FSMContext):
     success2 = await delete_tank_years(tank.id)
     
     if success:
-        await callback.message.edit_caption(
-            caption=f"✅ <b>Танк успешно удален!</b>\n\n"
-                   f"🎖️ {tank.name} ({tank.nation})\n"
-                   f"🆔 ID: {tank.id}",
-            parse_mode="HTML"
-        )
+        if callback.message.caption:
+            await callback.message.edit_caption(
+                caption=f"✅ <b>Танк успешно удален!</b>\n\n"
+                       f"🎖️ {tank.name} ({tank.nation})\n"
+                       f"🆔 ID: {tank.id}",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                text=f"✅ <b>Танк успешно удален!</b>\n\n"
+                    f"🎖️ {tank.name} ({tank.nation})\n"
+                    f"🆔 ID: {tank.id}",
+                parse_mode="HTML"
+            )
     else:
-        await callback.message.edit_caption(
-            caption="❌ <b>Не удалось удалить танк.</b>\n"
-                   "Попробуйте снова или обратитесь к администратору.",
-            parse_mode="HTML"
-        )
+        if callback.message.caption:
+            await callback.message.edit_caption(
+                caption="❌ <b>Не удалось удалить танк.</b>\n"
+                       "Попробуйте снова или обратитесь к администратору.",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                text="❌ <b>Не удалось удалить танк.</b>\n"
+                    "Попробуйте снова или обратитесь к администратору.",
+                parse_mode="HTML"
+            )
     
     await state.clear()
     await callback.answer()
@@ -1309,9 +1324,15 @@ async def confirm_delete_tank(callback: CallbackQuery, state: FSMContext):
 # Обработка отмены удаления
 @user.callback_query(F.data == "cancel_delete")
 async def cancel_delete_tank(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_caption(
-        caption="❌ <b>Удаление отменено.</b>",
-        parse_mode="HTML"
-    )
+    if callback.message.caption:
+        await callback.message.edit_caption(
+            caption="❌ <b>Удаление отменено.</b>",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            text="❌ <b>Удаление отменено.</b>",
+            parse_mode="HTML"
+        )
     await state.clear()
     await callback.answer()
