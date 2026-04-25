@@ -19,7 +19,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(nullable=True) 
     tg_id = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(nullable=True)
-    points: Mapped[int] = mapped_column(nullable=True, default=0)
+    points: Mapped[float] = mapped_column(nullable=True, default=0.0)
     fine: Mapped[str] = mapped_column()
 
 
@@ -78,6 +78,17 @@ class UserReward(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     reward_id: Mapped[int] = mapped_column(ForeignKey('rewards.id'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class Battle(Base):
+    __tablename__ = 'battles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column()
+    front: Mapped[str] = mapped_column()
+    date_str: Mapped[str] = mapped_column()
+    description: Mapped[str] = mapped_column()
+    map_photo_id: Mapped[str] = mapped_column(nullable=True)
+    equipment_text: Mapped[str] = mapped_column(nullable=True)
 
 
 async def async_main():

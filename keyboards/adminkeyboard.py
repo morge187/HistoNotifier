@@ -29,5 +29,13 @@ adminboard = ReplyKeyboardMarkup(keyboard=[
         KeyboardButton(text='Добавить танк'),
         KeyboardButton(text='Изменить танк'),
         KeyboardButton(text='Удалить танк'),
+    ],
+    [
+        KeyboardButton(text='Список сражений'),
+        KeyboardButton(text='Добавить сражение'),
+    ],
+    [
+        KeyboardButton(text='Изменить сражение'),
+        KeyboardButton(text='Удалить сражение'),
     ]
 ], resize_keyboard=True)

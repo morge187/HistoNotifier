@@ -217,18 +217,21 @@ async def process_new_datetime(message: Message, state: FSMContext):
 @admin_edit_router.message(EditEventStates.waiting_points)
 async def process_new_points(message: Message, state: FSMContext):
     try:
-        new_points = int(message.text.strip())
-        
-        if new_points <= 0:
-            await message.answer("❌ Количество очков должно быть положительным числом. Попробуйте еще раз:")
+        raw = message.text.strip().replace(',', '.')
+        new_points = round(float(raw), 2)
+        if '.' in raw and len(raw.split('.')[-1]) > 2:
+            await message.answer("❌ Максимум 2 знака после запятой. Попробуйте ещё раз:")
             return
-        
+        if new_points <= 0:
+            await message.answer("❌ Количество очков должно быть положительным числом. Попробуйте ещё раз:")
+            return
+
         await state.update_data(new_points=new_points)
         await message.answer(f"✅ Новое количество очков сохранено: {new_points}")
         await request_next_field(message, state)
-        
+
     except ValueError:
-        await message.answer("❌ Пожалуйста, введите число (например: 10, 50, 100):")
+        await message.answer("❌ Пожалуйста, введите число (например: 10, 5.5, 0.25):")
 
 # Обработка новой картинки
 @admin_edit_router.message(EditEventStates.waiting_image, F.content_type == ContentType.PHOTO)

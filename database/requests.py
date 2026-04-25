@@ -3,7 +3,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import and_, func
 from datetime import datetime
 
-from database.models import User, UserEvent, Event, async_session, Reward, UserReward, Tank, YearTank # Импорты модели User и асинхронной сессии
+from database.models import User, UserEvent, Event, async_session, Reward, UserReward, Tank, YearTank, Battle  # Импорты модели User и асинхронной сессии
 
 async def get_user(tg_id):
     async with async_session() as session: # Открываем асинхронную сессию
@@ -676,3 +676,66 @@ async def check_name_exists(name: str, exclude_user_id: int = None):
 async def get_user_by_id(user_id: int):
     async with async_session() as session:
         return await session.scalar(select(User).where(User.id == user_id))
+
+
+# ── Battles ──────────────────────────────────────────────────────────────────
+
+async def create_battle(
+    name: str,
+    front: str,
+    date_str: str,
+    description: str,
+    map_photo_id: str = None,
+    equipment_text: str = None,
+) -> bool:
+    async with async_session() as session:
+        try:
+            battle = Battle(
+                name=name,
+                front=front,
+                date_str=date_str,
+                description=description,
+                map_photo_id=map_photo_id,
+                equipment_text=equipment_text,
+            )
+            session.add(battle)
+            await session.commit()
+            return True
+        except Exception:
+            await session.rollback()
+            return False
+
+
+async def get_all_fronts() -> list:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Battle.front).distinct().order_by(Battle.front)
+        )
+        return result.scalars().all()
+
+
+async def get_battles_by_front(front: str) -> list:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Battle).where(Battle.front == front).order_by(Battle.name)
+        )
+        return result.scalars().all()
+
+
+async def get_battle_by_id(battle_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Battle).where(Battle.id == battle_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def delete_battle(battle_id: int) -> bool:
+    async with async_session() as session:
+        try:
+            await session.execute(delete(Battle).where(Battle.id == battle_id))
+            await session.commit()
+            return True
+        except Exception:
+            await session.rollback()
+            return False

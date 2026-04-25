@@ -103,21 +103,24 @@ async def get_event_datetime(message: Message, state: FSMContext):
 @admin.message(CreateEvent.points)
 async def get_event_points(message: Message, state: FSMContext):
     try:
-        points = int(message.text)
-        
-        if points <= 0:
-            await message.answer("Количество очков должно быть положительным числом. Введите еще раз:")
+        raw = message.text.strip().replace(',', '.')
+        points = round(float(raw), 2)
+        if '.' in raw and len(raw.split('.')[-1]) > 2:
+            await message.answer("Максимум 2 знака после запятой. Введите ещё раз:")
             return
-            
+        if points <= 0:
+            await message.answer("Количество очков должно быть положительным числом. Введите ещё раз:")
+            return
+
         await state.update_data(points=points)
         await message.answer(
             "✅ Количество очков сохранено!\n\n"
             "Шаг 5/5: Отправьте картинку для события (фото):"
         )
         await state.set_state(CreateEvent.image)
-        
+
     except ValueError:
-        await message.answer("Пожалуйста, введите число (например: 10, 50, 100):")
+        await message.answer("Пожалуйста, введите число (например: 10, 5.5, 0.25):")
 
 # 6. Функция для получения картинки
 @admin.message(CreateEvent.image, F.content_type == ContentType.PHOTO)
@@ -569,7 +572,11 @@ async def points_set_apply(message: Message, state: FSMContext):
     user_id = data.get("target_user_id")
 
     try:
-        value = int(message.text.strip())
+        raw = message.text.strip().replace(',', '.')
+        value = round(float(raw), 2)
+        if '.' in raw and len(raw.split('.')[-1]) > 2:
+            await message.answer("Максимум 2 знака после запятой.")
+            return
     except ValueError:
         await message.answer("Нужно число.")
         return
@@ -594,7 +601,11 @@ async def points_dec_apply(message: Message, state: FSMContext):
     user_id = data.get("target_user_id")
 
     try:
-        delta = int(message.text.strip())
+        raw = message.text.strip().replace(',', '.')
+        delta = round(float(raw), 2)
+        if '.' in raw and len(raw.split('.')[-1]) > 2:
+            await message.answer("Максимум 2 знака после запятой.")
+            return
     except ValueError:
         await message.answer("Нужно число.")
         return

@@ -953,11 +953,3 @@ async def reward_help_command(message: Message):
     await message.answer(help_text)
 
 # Ошибочки
-@reward_router.message()
-async def handle_unknown_commands(message: Message):
-    if message.text and any(word in message.text.lower() for word in ['награда', 'приз', 'подарок', 'reward']):
-        await message.answer(
-            "🏆 Система наград\n\n"
-            "Используйте команду /rewards чтобы увидеть доступные награды.\n"
-            "Или /reward_help для получения справки по командам."
-        )
