@@ -99,7 +99,8 @@ async def back_handler(callback: CallbackQuery):
         await callback.answer()
         return
 
-    if 0 <= front_idx < len(fronts):
+    if len(parts) >= 3 and 0 <= front_idx < len(fronts):
+        # came from battle detail → go back to battles list
         front = fronts[front_idx]
         battles = await get_battles_by_front(front)
         await callback.message.edit_text(
@@ -108,6 +109,7 @@ async def back_handler(callback: CallbackQuery):
             reply_markup=_battles_keyboard(battles, front_idx),
         )
     else:
+        # came from battles list → go back to fronts
         await callback.message.edit_text(
             "⚔️ <b>Список сражений</b>\n\nВыберите фронт:",
             parse_mode="HTML",
