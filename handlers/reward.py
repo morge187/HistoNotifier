@@ -12,6 +12,7 @@ from database.requests import (
     assign_reward_to_user, reset_rewards, get_enactive_rewards,
     get_reward_statistic
 )
+from utils import fmt_points
 
 reward_router = Router()
 
@@ -489,7 +490,7 @@ async def show_rewards_command(message: Message):
         rewards_by_price[reward.price].append(reward)
     
     response = f"🏆 Список доступных наград\n\n"
-    response += f"💎 Ваши очки: {user.points or 0}\n\n"
+    response += f"💎 Ваши очки: {fmt_points(user.points)}\n\n"
     
     for price in sorted(rewards_by_price.keys()):
         rewards_list = rewards_by_price[price]

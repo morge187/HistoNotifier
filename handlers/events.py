@@ -17,6 +17,7 @@ from database.requests import (
     get_all_events, delete_event_by_id, get_events,
     create_event, get_all_users, get_last_event_id
 )
+from utils import fmt_points
 
 events_router = Router()
 
@@ -70,7 +71,7 @@ async def show_events_list(message: Message, user) -> list | None:
     for i, event in enumerate(events, 1):
         response += f"{i}. {event.name}\n"
         response += f"   📅 {event.time.strftime('%d.%m.%Y %H:%M')}\n"
-        response += f"   🏆 {event.cost} очков\n\n"
+        response += f"   🏆 {fmt_points(event.cost)} очков\n\n"
 
     response += "Введите номер события для подробной информации (или 'отмена'):"
     await message.answer(response)
@@ -81,7 +82,7 @@ def build_event_caption(event) -> str:
     return (
         f"🎯 <b>{event.name}</b>\n\n"
         f"📅 <b>Дата и время:</b> {event.time.strftime('%d.%m.%Y %H:%M')}\n"
-        f"🏆 <b>Очки за посещение:</b> {event.cost}\n"
+        f"🏆 <b>Очки за посещение:</b> {fmt_points(event.cost)}\n"
         f"🆔 <b>ID события:</b> {event.id}"
     )
 
@@ -296,7 +297,7 @@ async def delete_event_command(message: Message, state: FSMContext):
     for i, e in enumerate(events, 1):
         text += f"{i}. 🆔 {e.id} | {e.name}\n"
         text += f"   📅 {e.time.strftime('%d.%m.%Y %H:%M')}\n"
-        text += f"   🏆 {e.cost} очков\n\n"
+        text += f"   🏆 {fmt_points(e.cost)} очков\n\n"
     text += "Введите номер ивента для удаления (или 'отмена'):"
 
     await state.update_data(events_for_deletion=events)
@@ -336,7 +337,7 @@ async def process_event_deletion(message: Message, state: FSMContext):
         "⚠️ ВНИМАНИЕ: Вы уверены, что хотите удалить этот ивент?\n\n"
         f"🎯 {event_to_delete.name}\n"
         f"📅 Дата: {event_to_delete.time.strftime('%d.%m.%Y %H:%M')}\n"
-        f"🏆 Очки: {event_to_delete.cost}\n"
+        f"🏆 Очки: {fmt_points(event_to_delete.cost)}\n"
         f"🆔 ID: {event_to_delete.id}\n\n"
         "Это действие невозможно отменить!"
     )
@@ -417,12 +418,17 @@ async def add_event_cost(message: Message, state: FSMContext):
         await message.answer("❌ Добавление ивента отменено.")
         return
 
-    text = (message.text or "").strip()
-    if not text.isdigit():
-        await message.answer("Нужно число. Пример: 10 (или 'отмена'):")
+    text = (message.text or "").strip().replace(',', '.')
+    try:
+        cost = round(float(text), 2)
+    except ValueError:
+        await message.answer("Нужно число. Пример: 10 или 8.5 (или 'отмена'):")
         return
 
-    cost = int(text)
+    if '.' in text and len(text.split('.')[-1]) > 2:
+        await message.answer("Максимум 2 знака после запятой. Введите снова (или 'отмена'):")
+        return
+
     if cost <= 0:
         await message.answer("Очки должны быть > 0. Введите снова (или 'отмена'):")
         return
@@ -478,7 +484,7 @@ async def add_event_photo(message: Message, state: FSMContext):
     event_info = (
         f"🎯 <b>{data['name']}</b>\n\n"
         f"📅 <b>Дата и время:</b> {data['time'].strftime('%d.%m.%Y %H:%M')}\n"
-        f"🏆 <b>Очки за посещение:</b> {data['cost']}\n"
+        f"🏆 <b>Очки за посещение:</b> {fmt_points(data['cost'])}\n"
         f"🆔 <b>ID события:</b> {event_id}"
     )
     

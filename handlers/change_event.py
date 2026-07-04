@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 
 from database.requests import get_user, get_all_events, get_event_by_id, update_event
+from utils import fmt_points
 
 admin_edit_router = Router()
 
@@ -71,7 +72,7 @@ async def process_event_id(message: Message, state: FSMContext):
         f"1. 📌 Название: {event.name}\n"
         f"2. 📝 Описание: {event.discription}\n"
         f"3. 📅 Дата и время: {event.time.strftime('%d.%m.%Y %H:%M')}\n"
-        f"4. 🏆 Очки за посещение: {event.cost}\n"
+        f"4. 🏆 Очки за посещение: {fmt_points(event.cost)}\n"
         f"5. 🖼️ Картинка: {'Есть' if event.photo_id else 'Нет'}\n\n"
     )
     
@@ -156,7 +157,7 @@ async def request_next_field(message: Message, state: FSMContext):
     elif field_num == 4:  # Очки
         await message.answer(
             f"🏆 Введите новое количество очков:\n"
-            f"Текущее: {current_event.cost}"
+            f"Текущее: {fmt_points(current_event.cost)}"
         )
         await state.set_state(EditEventStates.waiting_points)
         
@@ -227,7 +228,7 @@ async def process_new_points(message: Message, state: FSMContext):
             return
 
         await state.update_data(new_points=new_points)
-        await message.answer(f"✅ Новое количество очков сохранено: {new_points}")
+        await message.answer(f"✅ Новое количество очков сохранено: {fmt_points(new_points)}")
         await request_next_field(message, state)
 
     except ValueError:
@@ -280,7 +281,7 @@ async def finish_editing(message: Message, state: FSMContext):
             f"🆔 ID: {updated_event.id}\n"
             f"📌 Название: {updated_event.name}\n"
             f"📅 Дата и время: {updated_event.time.strftime('%d.%m.%Y %H:%M')}\n"
-            f"🏆 Очков за посещение: {updated_event.cost}\n"
+            f"🏆 Очков за посещение: {fmt_points(updated_event.cost)}\n"
             f"🖼️ Картинка: обновлена\n\n"
             f"✅ Все изменения сохранены!"
         )

@@ -6,6 +6,7 @@ from database.requests import get_user, get_events
 from keyboards import adminboard, userboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from utils import fmt_points
 
 user = Router()
 
@@ -123,7 +124,7 @@ async def menu(message: Message):
 @user.message(Command("my_cadrs"))
 async def kadrs(message: Message):
     user = await get_user(message.from_user.id)
-    await message.answer(f"У вас {user.points} кадров")
+    await message.answer(f"У вас {fmt_points(user.points)} кадров")
 
 from aiogram import Router, F
 from aiogram.fsm.state import State, StatesGroup

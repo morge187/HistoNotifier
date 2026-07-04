@@ -10,6 +10,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, ContentType, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
+from utils import fmt_points
 
 load_dotenv()
 
@@ -141,7 +142,7 @@ async def get_event_image(message: Message, state: FSMContext):
         f"📌 Название: {data['name']}\n"
         f"📝 Описание: {data['description']}\n"
         f"📅 Дата и время: {data['datetime_str']}\n"
-        f"🏆 Очков за посещение: {data['points']}\n"
+        f"🏆 Очков за посещение: {fmt_points(data['points'])}\n"
         f"🖼️ Картинка: отправлена"
     )
     
@@ -278,7 +279,7 @@ def render_admin_user(user) -> str:
     lines = [
         f"Игрок: {user.name}",
         f"Штраф: {fine}",
-        f"Очки: {points}",
+        f"Очки: {fmt_points(points)}",
     ]
     if status is not None:
         lines.append(f"Статус: {status}")
@@ -344,7 +345,7 @@ async def mode_all(callback: CallbackQuery, state: FSMContext):
         await state.set_state(FineStates.wait_pick_user_number)
         await state.update_data(pick_ids=[u.id for u in users])
 
-        lines = [f"{i}. {u.name} (очки: {u.points or 0})" for i, u in enumerate(users, start=1)]
+        lines = [f"{i}. {u.name} (очки: {fmt_points(u.points)})" for i, u in enumerate(users, start=1)]
         await callback.message.answer("\n".join(lines) + "\n\nВведи номер игрока:")
         await callback.answer()
         return
@@ -418,7 +419,7 @@ async def mode_event_apply(message: Message, state: FSMContext):
         await state.set_state(FineStates.wait_pick_user_number)
         await state.update_data(pick_ids=[u.id for u in users])
 
-        lines = [f"{i}. {u.name} (очки: {u.points or 0})" for i, u in enumerate(users, start=1)]
+        lines = [f"{i}. {u.name} (очки: {fmt_points(u.points)})" for i, u in enumerate(users, start=1)]
         await message.answer("\n".join(lines) + "\n\nВведи номер игрока:")
         return
 
@@ -584,7 +585,7 @@ async def points_set_apply(message: Message, state: FSMContext):
     await set_user_points_value(user_id, value)
     user = await get_user_by_id(user_id)
     await message.answer(
-        f"✅ Очки установлены на {value}.\n\n" + render_admin_user(user),
+        f"✅ Очки установлены на {fmt_points(value)}.\n\n" + render_admin_user(user),
         reply_markup=kb_admin_user_actions(user.id)
     )
     await state.clear()
@@ -613,7 +614,7 @@ async def points_dec_apply(message: Message, state: FSMContext):
     await decrease_user_points(user_id, delta)
     user = await get_user_by_id(user_id)
     await message.answer(
-        f"✅ Очки уменьшены на {delta}.\n\n" + render_admin_user(user),
+        f"✅ Очки уменьшены на {fmt_points(delta)}.\n\n" + render_admin_user(user),
         reply_markup=kb_admin_user_actions(user.id)
     )
     await state.clear()

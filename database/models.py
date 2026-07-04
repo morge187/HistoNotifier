@@ -57,7 +57,7 @@ class Event(Base):
     photo_id = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(nullable=True)
     time = mapped_column(DateTime)
-    cost: Mapped[int] = mapped_column(nullable=True)
+    cost: Mapped[float] = mapped_column(nullable=True)
 
 
 class Reward(Base):
