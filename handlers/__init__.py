@@ -9,6 +9,7 @@ from .usercommands import user
 from .events import events_router
 from .reward import reward_router
 from .battles import battles_router
+from .search import search_router
 
 # ── Главный роутер (регистрация, ник, отмена) ────────────────────────────────
 main_router = Router(name="main")
@@ -28,6 +29,8 @@ user_router.include_router(events_router)
 user_router.include_router(reward_router)
 user_router.include_router(battles_router)
 
-handlers = [main_router, admin_router, user_router]
+# search_router идёт первым: кнопка «🔍 Поиск» должна срабатывать из любого
+# состояния, а свои состояния он при необходимости отдаёт дальше (SkipHandler).
+handlers = [search_router, main_router, admin_router, user_router]
 
 __all__ = ["handlers"]
