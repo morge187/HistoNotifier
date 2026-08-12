@@ -4,6 +4,7 @@ from sqlalchemy import and_, func
 from datetime import datetime
 
 from database.models import User, UserEvent, Event, async_session, Reward, UserReward, Tank, YearTank, Battle  # Импорты модели User и асинхронной сессии
+from utils import loose_text, normalize_text
 
 async def get_user(tg_id):
     async with async_session() as session: # Открываем асинхронную сессию
@@ -561,9 +562,44 @@ async def get_tank_with_years(tank_id: int):
             .order_by(YearTank.year)
         )
         years = [row[0] for row in years_result.all()]
-        
+
         return tank, years
-    
+
+
+async def search_tanks_by_name(query: str) -> list:
+    """Поиск танков по названию.
+
+    Фильтрация идёт в Python, а не через LIKE: SQLite не умеет приводить
+    кириллицу к нижнему регистру, поэтому поиск через SQL был бы
+    чувствителен к регистру. Танков несколько сотен — это дёшево.
+
+    Порядок результатов: точные совпадения → начинается с запроса → содержит.
+    """
+    query_norm = normalize_text(query)
+    query_loose = loose_text(query)
+    if not query_loose:
+        return []
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Tank).order_by(Tank.name, Tank.nation)
+        )
+        tanks = result.scalars().all()
+
+    exact, starts, contains = [], [], []
+    for tank in tanks:
+        name_norm = normalize_text(tank.name)
+        name_loose = loose_text(tank.name)
+        if name_norm == query_norm or name_loose == query_loose:
+            exact.append(tank)
+        elif name_loose.startswith(query_loose):
+            starts.append(tank)
+        elif query_loose in name_loose:
+            contains.append(tank)
+
+    return exact + starts + contains
+
+
 async def get_users_with_fines():
     async with async_session() as session:
         result = await session.execute(

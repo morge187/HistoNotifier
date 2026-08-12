@@ -6,7 +6,7 @@ from database.requests import get_user, get_events
 from keyboards import adminboard, userboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from utils import fmt_points
+from utils import cadr_message
 
 user = Router()
 
@@ -124,7 +124,7 @@ async def menu(message: Message):
 @user.message(Command("my_cadrs"))
 async def kadrs(message: Message):
     user = await get_user(message.from_user.id)
-    await message.answer(f"У вас {fmt_points(user.points)} кадров")
+    await message.answer(cadr_message(user.points if user else 0))
 
 from aiogram import Router, F
 from aiogram.fsm.state import State, StatesGroup
@@ -275,7 +275,7 @@ async def process_nation_choice(callback: CallbackQuery, state: FSMContext):
 
     if not tank_types:
         await state.update_data(selected_tank_type=None)
-        await show_tanks_list(callback.message, tanks, nation, "tanks_by_nation")
+        await show_tanks_list(callback.message, tanks, nation, "tanks_by_nation", state=state)
         await callback.answer()
         return
 
@@ -351,36 +351,47 @@ async def process_tank_type_choice(callback: CallbackQuery, state: FSMContext):
     )
 
     # ✅ ИСПРАВЛЕНО: Кнопка "Назад" теперь ведет на выбор типа
-    await show_tanks_list(callback.message, filtered_tanks, nation, f"nation_{nation_idx}", type_label)
+    await show_tanks_list(callback.message, filtered_tanks, nation, f"nation_{nation_idx}", type_label, state=state)
     await callback.answer()
 
-async def show_tanks_list(message: Message, tanks, nation, back_callback="tanks", type_label=""):
-    response = f"🎖️ <b>Танки {nation}</b>"
-    if type_label:
-        response += f" ({type_label})"
-    response += f"\n\n📊 Всего: {len(tanks)}\n\n"
-    
-    for i, tank in enumerate(tanks, 1):
-        response += f"{i}. <b>{tank.name}</b>\n"
-    
+def tank_list_keyboard(back_callback="tanks"):
     keyboard = InlineKeyboardBuilder()
     keyboard.add(
         InlineKeyboardButton(
-            text="🔍 Подробнее о танке", 
+            text="🔍 Подробнее о танке",
             callback_data="show_tank_details"
         )
     )
     keyboard.add(
         InlineKeyboardButton(
-            text="Назад", 
+            text="Назад",
             callback_data=back_callback
         )
     )
-    
+    return keyboard.as_markup()
+
+
+async def remember_tank_list(state: FSMContext, list_text: str, back_callback: str):
+    """Запоминает список, чтобы к нему можно было вернуться из карточки танка."""
+    if state:
+        await state.update_data(list_text=list_text, list_back_cb=back_callback)
+
+
+async def show_tanks_list(message: Message, tanks, nation, back_callback="tanks", type_label="", state: FSMContext = None):
+    response = f"🎖️ <b>Танки {nation}</b>"
+    if type_label:
+        response += f" ({type_label})"
+    response += f"\n\n📊 Всего: {len(tanks)}\n\n"
+
+    for i, tank in enumerate(tanks, 1):
+        response += f"{i}. <b>{tank.name}</b>\n"
+
+    await remember_tank_list(state, response, back_callback)
+
     await message.edit_text(
         response,
         parse_mode="HTML",
-        reply_markup=keyboard.as_markup()
+        reply_markup=tank_list_keyboard(back_callback)
     )
 
 
@@ -389,18 +400,23 @@ async def show_tanks_list(message: Message, tanks, nation, back_callback="tanks"
 async def ask_for_tank_number(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     tanks = data.get('tanks', [])
-    
+
     if not tanks:
         await callback.answer("🚫 Список танков пуст")
         return
-    
+
     max_number = len(tanks)
-    
-    await callback.message.answer(
+
+    prompt = await callback.message.answer(
         f"🔢 <b>Введите номер танка (от 1 до {max_number}):</b>",
         parse_mode="HTML"
     )
-    
+
+    # Запоминаем сообщения, чтобы кнопка «Назад» могла их убрать
+    await state.update_data(
+        list_msg_id=callback.message.message_id,
+        number_prompt_msg_id=prompt.message_id
+    )
     await state.set_state(TankStates.waiting_tank_number)
     await callback.answer()
 
@@ -425,7 +441,7 @@ async def process_tank_number(message: Message, state: FSMContext):
     selected_tank = tanks[tank_number - 1]
     years = await get_tank_years(selected_tank.id)
     years_str = ", ".join(map(str, years)) if years else "Не указаны"
-    
+
     tank_card = (
         f"🎖️ <b>{selected_tank.name}</b>\n\n"
         f"🇺🇳 <b>Нация:</b> {selected_tank.nation}\n"
@@ -433,18 +449,88 @@ async def process_tank_number(message: Message, state: FSMContext):
         f"📅 <b>Годы:</b> {years_str}\n"
         f"🆔 <b>ID:</b> {selected_tank.id}\n\n"
     )
-    
-    await message.answer_photo(
-        photo=selected_tank.photo_id,
-        caption=tank_card,
-        parse_mode="HTML"
+
+    photo_msg_id = None
+    try:
+        photo_msg = await message.answer_photo(
+            photo=selected_tank.photo_id,
+            caption=tank_card,
+            parse_mode="HTML"
+        )
+        photo_msg_id = photo_msg.message_id
+    except Exception:
+        await message.answer(tank_card, parse_mode="HTML")
+
+    back_keyboard = InlineKeyboardBuilder()
+    back_keyboard.add(
+        InlineKeyboardButton(
+            text="◀️ Назад к списку",
+            # id фото в callback_data, чтобы кнопка работала и после перезапуска
+            callback_data=f"tank_card_back_{photo_msg_id or 0}"
+        )
     )
+
     await message.answer(
         f"📝 <b>Описание:</b>\n{selected_tank.discript}\n\n",
-        parse_mode='HTML'
+        parse_mode='HTML',
+        reply_markup=back_keyboard.as_markup()
     )
-    
-    await state.clear()
+
+    # Состояние ожидания номера снимаем, но данные списка сохраняем — они нужны
+    # кнопке «Назад к списку»
+    await state.set_state(None)
+
+
+# Возврат из карточки танка к списку, из которого её открыли
+@user.callback_query(F.data.startswith("tank_card_back"))
+async def back_from_tank_card(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    chat_id = callback.message.chat.id
+
+    try:
+        photo_msg_id = int(callback.data.rsplit("_", 1)[1])
+    except (ValueError, IndexError):
+        photo_msg_id = 0
+
+    # Убираем карточку: фото, подсказку с номером и старый список
+    to_delete = [photo_msg_id, data.get('number_prompt_msg_id'), data.get('list_msg_id')]
+    for message_id in to_delete:
+        if not message_id:
+            continue
+        try:
+            await callback.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    list_text = data.get('list_text')
+    tanks = data.get('tanks', [])
+
+    if not list_text or not tanks:
+        keyboard = InlineKeyboardBuilder()
+        keyboard.add(InlineKeyboardButton(text="🎖️ Список танков", callback_data="tanks"))
+        await callback.message.answer(
+            "⚠️ Список устарел, откройте его заново.",
+            reply_markup=keyboard.as_markup()
+        )
+        await callback.answer()
+        return
+
+    sent = await callback.message.answer(
+        list_text,
+        parse_mode="HTML",
+        reply_markup=tank_list_keyboard(data.get('list_back_cb', 'tanks'))
+    )
+
+    await state.update_data(
+        list_msg_id=sent.message_id,
+        number_prompt_msg_id=None
+    )
+    await callback.answer()
 
 
 # Список танков по годам
@@ -565,7 +651,9 @@ async def process_year_view_choice(callback: CallbackQuery, state: FSMContext):
             selected_year=year,
             tanks=tanks,
             view_type="all",
-            current_page=0
+            current_page=0,
+            list_text=response,
+            list_back_cb=f"year_{year}"
         )
         
         keyboard = InlineKeyboardBuilder()
@@ -621,7 +709,9 @@ async def process_year_tank_type_choice(callback: CallbackQuery, state: FSMConte
         selected_tank_type=tank_type,
         tanks=tanks,
         view_type="by_type",
-        current_page=0
+        current_page=0,
+        list_text=response,
+        list_back_cb=f"yearview_{year}"
     )
     
     keyboard = InlineKeyboardBuilder()
@@ -645,18 +735,22 @@ async def process_year_tank_type_choice(callback: CallbackQuery, state: FSMConte
 async def ask_for_tank_number_year(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     tanks = data.get('tanks', [])
-    
+
     if not tanks:
         await callback.answer("🚫 Список танков пуст")
         return
-    
+
     max_number = len(tanks)
-    
-    await callback.message.answer(
+
+    prompt = await callback.message.answer(
         f"🔢 <b>Введите номер танка (от 1 до {max_number}):</b>",
         parse_mode="HTML"
     )
-    
+
+    await state.update_data(
+        list_msg_id=callback.message.message_id,
+        number_prompt_msg_id=prompt.message_id
+    )
     await state.set_state(TankStates.waiting_tank_number)
     await callback.answer()
 

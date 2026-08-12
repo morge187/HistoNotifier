@@ -14,6 +14,7 @@ adminboard = ReplyKeyboardMarkup(keyboard=[
     [
         KeyboardButton(text='Список ивентов'),
         KeyboardButton(text='Список танков'),
+        KeyboardButton(text='🔍 Поиск')
     ],
     [
         KeyboardButton(text='Добавить ивент'),

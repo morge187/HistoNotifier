@@ -17,5 +17,6 @@ userboard = ReplyKeyboardMarkup(keyboard=[
     ],
     [
         KeyboardButton(text='Список сражений'),
+        KeyboardButton(text='🔍 Поиск')
     ]
 ], resize_keyboard=True)
