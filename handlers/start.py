@@ -2,10 +2,10 @@ from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from aiogram import Router
 from aiogram import F
-from keyboards import userboard
+from keyboards import userboard, adminboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from database.requests import set_user, set_status, set_name_user, get_user
+from database.requests import set_user, set_status, set_name_user, get_user, check_name_exists
 
 start = Router()
 
@@ -33,27 +33,41 @@ async def chacge_name(message: Message, state: FSMContext):
     await message.answer('Напиши свой ник')
     await state.set_state(Name.name)
 
+async def board_for(tg_id):
+    user = await get_user(tg_id)
+    return adminboard if user and user.status == 'admin' else userboard
+
+
 @start.message(Name.name)
 async def set_name_to_user(message: Message, state: FSMContext):
-    new_nick = message.text.strip()
-    
-    # Проверка на пустой ник
-    if not new_nick or len(new_nick) < 2:
+    # Стикер, фото и прочее нетекстовое: message.text == None
+    if not message.text:
+        await message.answer('Ник нужно прислать текстом. Попробуй ещё раз:')
+        return
+
+    new_nick = ' '.join(message.text.split())
+
+    # Отмену ловим здесь: пока активно состояние Name.name,
+    # до общего обработчика cancel_accept сообщение не доходит
+    if new_nick in array_exchange:
+        await state.clear()
+        await message.answer('Смена ника отменена',
+                             reply_markup=await board_for(message.from_user.id))
+        return
+
+    if len(new_nick) < 2:
         await message.answer('Ник должен содержать минимум 2 символа. Попробуй ещё раз:')
         return
-    
-    # Проверка на уникальность ника
-    from database.requests import check_name_exists
-    name_taken = await check_name_exists(new_nick)
-    
-    if name_taken:
+
+    # Свой текущий ник занятым не считается, иначе поправить его регистр нельзя
+    if await check_name_exists(new_nick, exclude_tg_id=message.from_user.id):
         await message.answer(f'❌ Ник "{new_nick}" уже занят. Выбери другой:')
         return
-    
-    # Ник уникален
+
     await set_name_user(message.from_user.id, new_nick)
-    await message.answer(f'✅ Ваш ник "{new_nick}" успешно сохранён', reply_markup=userboard)
     await state.clear()
+    await message.answer(f'✅ Ваш ник "{new_nick}" успешно сохранён',
+                         reply_markup=await board_for(message.from_user.id))
 
 @start.message(F.text.in_(array_exchange))
 async def cancel_accept(message: Message, state: FSMContext):

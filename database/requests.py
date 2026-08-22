@@ -702,12 +702,30 @@ async def decrease_user_points(user_id: int, delta: float):
 async def reset_user_points(user_id: int):
     return await set_user_points_value(user_id, 0)
 
-async def check_name_exists(name: str, exclude_user_id: int = None):
+async def check_name_exists(name: str, exclude_tg_id: int = None):
+    """True, если ник уже занят кем-то другим (без учёта регистра и пробелов).
+
+    Сравнение идёт в Python по той же причине, что и поиск танков:
+    SQLite lower() не приводит кириллицу к нижнему регистру.
+
+    exclude_tg_id — владелец, которого не считаем конкурентом,
+    чтобы пользователь мог переотправить свой же ник.
+    """
+    target = normalize_text(name)
+    if not target:
+        return False
+
     async with async_session() as session:
-        query = select(User).where(func.lower(User.name) == func.lower(name))
-        if exclude_user_id:
-            query = query.where(User.id != exclude_user_id)
-        return await session.scalar(query) is not None
+        rows = await session.execute(
+            select(User.tg_id, User.name).where(User.name.is_not(None))
+        )
+        for tg_id, existing in rows:
+            if exclude_tg_id is not None and tg_id == exclude_tg_id:
+                continue
+            if normalize_text(existing) == target:
+                return True
+
+    return False
 
 async def get_user_by_id(user_id: int):
     async with async_session() as session:
