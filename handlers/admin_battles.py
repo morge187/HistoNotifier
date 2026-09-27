@@ -37,6 +37,13 @@ class DeleteBattle(StatesGroup):
     confirm = State()
 
 
+def map_media(message: Message) -> tuple:
+    """(file_id, тип) для карты: GIF приходит как animation, картинка — как photo."""
+    if message.animation:
+        return message.animation.file_id, "animation"
+    return message.photo[-1].file_id, "photo"
+
+
 # ── Start ────────────────────────────────────────────────────────────────────
 
 @admin_battles.message(F.text == "Добавить сражение")
@@ -99,17 +106,17 @@ async def get_battle_date(message: Message, state: FSMContext):
     await state.update_data(date_str=message.text.strip())
     await message.answer(
         "✅ Дата сохранена!\n\n"
-        "Шаг 4/6: Отправьте карту сражения (фото):"
+        "Шаг 4/6: Отправьте карту сражения (фото или GIF):"
     )
     await state.set_state(CreateBattle.map_photo)
 
 
 # ── Step 4: Map photo ─────────────────────────────────────────────────────────
 
-@admin_battles.message(CreateBattle.map_photo, F.content_type == ContentType.PHOTO)
+@admin_battles.message(CreateBattle.map_photo, F.photo | F.animation)
 async def get_battle_map(message: Message, state: FSMContext):
-    photo = message.photo[-1]
-    await state.update_data(map_photo_id=photo.file_id)
+    file_id, media_type = map_media(message)
+    await state.update_data(map_photo_id=file_id, map_media_type=media_type)
     await message.answer(
         "✅ Карта сохранена!\n\n"
         "Шаг 5/6: Введите описание сражения (история, план боя и т.д.):"
@@ -119,7 +126,7 @@ async def get_battle_map(message: Message, state: FSMContext):
 
 @admin_battles.message(CreateBattle.map_photo)
 async def wrong_map_format(message: Message, state: FSMContext):
-    await message.answer("Пожалуйста, отправьте именно фото (карту сражения):")
+    await message.answer("Пожалуйста, отправьте фото или GIF (карту сражения):")
 
 
 # ── Step 5: Description ───────────────────────────────────────────────────────
@@ -156,6 +163,7 @@ async def get_battle_equipment(message: Message, state: FSMContext):
         description=data["description"],
         map_photo_id=data.get("map_photo_id"),
         equipment_text=equipment_text,
+        map_media_type=data.get("map_media_type"),
     )
 
     await state.clear()
@@ -345,7 +353,7 @@ async def edit_choose_battle(message: Message, state: FSMContext):
         "1 — Название\n"
         "2 — Фронт\n"
         "3 — Дату\n"
-        "4 — Карту (фото)\n"
+        "4 — Карту (фото или GIF)\n"
         "5 — Описание\n"
         "6 — Технику",
         parse_mode="HTML",
@@ -364,7 +372,7 @@ async def edit_choose_field(message: Message, state: FSMContext):
         "1": "Введите новое название:",
         "2": "Введите новый фронт:",
         "3": "Введите новую дату:",
-        "4": "Отправьте новую карту (фото):",
+        "4": "Отправьте новую карту (фото или GIF):",
         "5": "Введите новое описание:",
         "6": "Введите новый список техники:",
     }
@@ -431,14 +439,15 @@ async def edit_new_date(message: Message, state: FSMContext):
     await _apply_edit(message, state, date_str=message.text.strip())
 
 
-@admin_battles.message(EditBattle.new_map, F.content_type == ContentType.PHOTO)
+@admin_battles.message(EditBattle.new_map, F.photo | F.animation)
 async def edit_new_map(message: Message, state: FSMContext):
-    await _apply_edit(message, state, map_photo_id=message.photo[-1].file_id)
+    file_id, media_type = map_media(message)
+    await _apply_edit(message, state, map_photo_id=file_id, map_media_type=media_type)
 
 
 @admin_battles.message(EditBattle.new_map)
 async def edit_new_map_wrong(message: Message):
-    await message.answer("Пожалуйста, отправьте фото (карту):")
+    await message.answer("Пожалуйста, отправьте фото или GIF (карту):")
 
 
 @admin_battles.message(EditBattle.new_description)

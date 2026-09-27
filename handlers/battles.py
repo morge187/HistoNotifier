@@ -148,7 +148,10 @@ async def show_battle_detail(callback: CallbackQuery):
 
     photo_msg_id = 0
     if battle.map_photo_id:
-        sent = await callback.message.answer_photo(photo=battle.map_photo_id)
+        if battle.map_media_type == "animation":
+            sent = await callback.message.answer_animation(animation=battle.map_photo_id)
+        else:
+            sent = await callback.message.answer_photo(photo=battle.map_photo_id)
         photo_msg_id = sent.message_id
 
     kb = InlineKeyboardBuilder()

@@ -741,6 +741,7 @@ async def create_battle(
     description: str,
     map_photo_id: str = None,
     equipment_text: str = None,
+    map_media_type: str = None,
 ) -> bool:
     async with async_session() as session:
         try:
@@ -750,6 +751,7 @@ async def create_battle(
                 date_str=date_str,
                 description=description,
                 map_photo_id=map_photo_id,
+                map_media_type=map_media_type,
                 equipment_text=equipment_text,
             )
             session.add(battle)
