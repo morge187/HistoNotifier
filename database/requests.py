@@ -335,6 +335,31 @@ async def get_user_rewards(user_id: int):
         )
         return result.scalars().all()
 
+async def get_user_rewards_with_status(user_id: int) -> list:
+    """[(UserReward, Reward), ...] — покупки пользователя со статусом выдачи."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserReward, Reward)
+            .join(Reward, Reward.id == UserReward.reward_id)
+            .where(UserReward.user_id == user_id)
+            .order_by(UserReward.created_at.desc(), UserReward.id.desc())
+        )
+        return [(ur, reward) for ur, reward in result.all()]
+
+
+async def toggle_reward_issued(user_reward_id: int):
+    """Переключает «выдан/не выдан». Возвращает (issued, tg_id владельца, название) или None."""
+    async with async_session() as session:
+        ur = await session.get(UserReward, user_reward_id)
+        if not ur:
+            return None
+        ur.issued = not ur.issued
+        issued = ur.issued
+        reward = await session.get(Reward, ur.reward_id)
+        owner = await session.get(User, ur.user_id)
+        await session.commit()
+        return issued, (owner.tg_id if owner else None), (reward.name if reward else "Награда")
+
 async def is_admin(user_id: int) -> bool:
     user = await get_user(user_id)
     return user and user.status == 'admin'

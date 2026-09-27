@@ -14,3 +14,31 @@ def test_new_user_is_not_onboarded(db):
     user = asyncio.run(r.get_user(200))
     assert user.onboarded is False
     assert user.is_banned is False
+
+
+from database.models import Reward, UserReward
+
+
+def add_reward_to(db, user_id, name="Камуфляж №1") -> int:
+    async def go():
+        async with db() as session:
+            reward = Reward(name=name, gift_link="https://x", price=1)
+            session.add(reward)
+            await session.flush()
+            ur = UserReward(user_id=user_id, reward_id=reward.id)
+            session.add(ur)
+            await session.commit()
+            return ur.id
+    return asyncio.run(go())
+
+
+def test_reward_status_toggle(db, make_user):
+    uid = make_user(tg_id=400)
+    ur_id = add_reward_to(db, uid)
+
+    [(ur, reward)] = asyncio.run(r.get_user_rewards_with_status(uid))
+    assert (ur.id, reward.name, ur.issued) == (ur_id, "Камуфляж №1", False)
+
+    assert asyncio.run(r.toggle_reward_issued(ur_id)) == (True, 400, "Камуфляж №1")
+    assert asyncio.run(r.toggle_reward_issued(ur_id)) == (False, 400, "Камуфляж №1")
+    assert asyncio.run(r.toggle_reward_issued(9999)) is None

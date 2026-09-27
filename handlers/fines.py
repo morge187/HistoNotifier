@@ -1,6 +1,6 @@
 """Матч-штрафы: поиск игроков, карточка игрока для админа, штрафы и очки."""
 from aiogram import Router, F
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -16,9 +16,11 @@ from database.requests import (
     get_event_participants,
     get_user_by_id,
     get_user_by_name,
+    get_user_rewards_with_status,
     is_admin,
     reset_user_points,
     set_user_points_value,
+    toggle_reward_issued,
 )
 from utils import fmt_points, parse_amount
 
@@ -35,7 +37,7 @@ class FineMenuCb(CallbackData, prefix="fine_menu"):
 
 
 class FineAdminCb(CallbackData, prefix="fine_adm"):
-    action: str  # card | points_zero | points_set | points_dec | fine_add | fines_list
+    action: str  # card | points_zero | points_set | points_dec | fine_add | fines_list | rewards_list
     user_id: int
 
 
@@ -46,6 +48,11 @@ class FineRemoveCb(CallbackData, prefix="fine_rm"):
 
 class BackCb(CallbackData, prefix="back"):
     target: str  # to_main
+
+
+class RewardToggleCb(CallbackData, prefix="rw_tgl"):
+    user_reward_id: int
+    user_id: int
 
 
 # ---------- FSM ----------
@@ -99,6 +106,15 @@ def render_fines_list(user, fines) -> str:
     return "\n".join(lines)
 
 
+def render_rewards_list(user, items) -> str:
+    if not items:
+        return f"У игрока {user.name} нет покупок."
+    lines = [f"Награды {user.name} (нажми, чтобы переключить):"]
+    lines += [f"{i}. {reward.name} — {'выдан ✅' if ur.issued else 'не выдан ❌'}"
+              for i, (ur, reward) in enumerate(items, start=1)]
+    return "\n".join(lines)
+
+
 # ---------- Keyboards ----------
 
 def kb_search_menu():
@@ -118,6 +134,7 @@ def kb_admin_user_actions(user):
         ("Убавить очки", "points_dec"),
         ("Добавить штраф", "fine_add"),
         ("Штрафы игрока", "fines_list"),
+        ("Награды игрока", "rewards_list"),
     ):
         kb.button(text=text, callback_data=FineAdminCb(action=action, user_id=user.id).pack())
     kb.button(text="Назад", callback_data=BackCb(target="to_main").pack())
@@ -131,6 +148,16 @@ def kb_fines_list(user_id: int, fines):
         kb.button(text=f"Снять №{i}", callback_data=FineRemoveCb(fine_id=fine.id, user_id=user_id).pack())
     kb.button(text="◀️ К игроку", callback_data=FineAdminCb(action="card", user_id=user_id).pack())
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def kb_rewards_list(user_id: int, items):
+    kb = InlineKeyboardBuilder()
+    for i, (ur, _reward) in enumerate(items, start=1):
+        kb.button(text=f"{'✅' if ur.issued else '❌'} №{i}",
+                  callback_data=RewardToggleCb(user_reward_id=ur.id, user_id=user_id).pack())
+    kb.button(text="◀️ К игроку", callback_data=FineAdminCb(action="card", user_id=user_id).pack())
+    kb.adjust(4)
     return kb.as_markup()
 
 
@@ -370,6 +397,12 @@ async def admin_buttons(callback: CallbackQuery, callback_data: FineAdminCb, sta
         await callback.answer()
         return
 
+    if action == "rewards_list":
+        items = await get_user_rewards_with_status(user.id)
+        await callback.message.answer(render_rewards_list(user, items), reply_markup=kb_rewards_list(user.id, items))
+        await callback.answer()
+        return
+
     await callback.answer("Неизвестное действие.", show_alert=True)
 
 
@@ -462,3 +495,30 @@ async def fine_cost_apply(message: Message, state: FSMContext):
         return
     user = await get_user_by_id(fine.user_id)
     await send_admin_card(message, user, "✅ Штраф добавлен.\n\n")
+
+
+# ---------- Admin: reward issued toggle ----------
+
+@fines_router.callback_query(RewardToggleCb.filter())
+async def reward_toggle(callback: CallbackQuery, callback_data: RewardToggleCb):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
+
+    toggled = await toggle_reward_issued(callback_data.user_reward_id)
+    if toggled is None:
+        await callback.answer("Покупка не найдена.", show_alert=True)
+        return
+
+    issued, owner_tg_id, reward_name = toggled
+    await callback.answer("Выдан ✅" if issued else "Не выдан ❌")
+    if issued and owner_tg_id:
+        try:
+            await callback.bot.send_message(owner_tg_id, f"🎁 Награда «{reward_name}» выдана ✅")
+        except TelegramAPIError:
+            pass
+
+    user = await get_user_by_id(callback_data.user_id)
+    if user:
+        items = await get_user_rewards_with_status(user.id)
+        await safe_edit(callback.message, render_rewards_list(user, items), kb_rewards_list(user.id, items))
