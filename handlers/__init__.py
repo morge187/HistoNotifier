@@ -10,6 +10,7 @@ from .events import events_router
 from .reward import reward_router
 from .battles import battles_router
 from .search import search_router
+from .training import training_router
 
 # ── Главный роутер (регистрация, ник, отмена) ────────────────────────────────
 main_router = Router(name="main")
@@ -25,6 +26,7 @@ admin_router.include_router(admin_battles)
 # ── Пользовательский роутер ──────────────────────────────────────────────────
 user_router = Router(name="user")
 user_router.include_router(user)
+user_router.include_router(training_router)
 user_router.include_router(events_router)
 user_router.include_router(reward_router)
 user_router.include_router(battles_router)
