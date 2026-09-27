@@ -28,6 +28,7 @@ class TrainCb(CallbackData, prefix="train"):
 
 
 class TrainAnswerCb(CallbackData, prefix="train_ans"):
+    test_id: int
     index: int
     option: int
 
@@ -46,7 +47,10 @@ def question_text(data: dict) -> str:
 async def send_question(message: Message, data: dict):
     kb = InlineKeyboardBuilder()
     for n in range(1, 5):
-        kb.button(text=str(n), callback_data=TrainAnswerCb(index=data["tt_i"], option=n).pack())
+        kb.button(
+            text=str(n),
+            callback_data=TrainAnswerCb(test_id=data["tt_id"], index=data["tt_i"], option=n).pack(),
+        )
     kb.adjust(4)
     await message.answer(question_text(data), reply_markup=kb.as_markup())
 
@@ -97,10 +101,18 @@ async def training_open(callback: CallbackQuery, callback_data: TrainCb):
 
 @training_router.callback_query(TrainCb.filter(F.action == "start"))
 async def training_start(callback: CallbackQuery, callback_data: TrainCb, state: FSMContext):
+    # Лочим состояние ДО любых DB-обращений, чтобы повторный тап (или тап во
+    # время уже идущего теста) не мог списать кадры второй раз.
+    if await state.get_state() == TrainStates.in_test.state:
+        await callback.answer("Сначала закончи текущий тест (или напиши «отмена»)", show_alert=True)
+        return
+    await state.set_state(TrainStates.in_test)
+
     user = await get_user(callback.from_user.id)
     test = await get_test(callback_data.test_id)
     questions = await get_questions(callback_data.test_id) if test else []
     if not user or not test or not questions:
+        await state.clear()
         await callback.answer("Тест не найден.", show_alert=True)
         return
 
@@ -110,16 +122,18 @@ async def training_start(callback: CallbackQuery, callback_data: TrainCb, state:
         user.points, test.cost, datetime.now(),
     )
     if decision == "passed":
+        await state.clear()
         await callback.answer("✅ Тест уже пройден", show_alert=True)
         return
     if decision == "cooldown":
+        await state.clear()
         await callback.answer(f"Попробуй через {fmt_duration(left)}", show_alert=True)
         return
     if decision == "no_points" or not await charge_points(user.id, test.cost):
+        await state.clear()
         await callback.answer("Недостаточно кадров", show_alert=True)
         return
 
-    await state.set_state(TrainStates.in_test)
     data = {
         "tt_id": test.id,
         "tt_title": test.title,
@@ -128,8 +142,11 @@ async def training_start(callback: CallbackQuery, callback_data: TrainCb, state:
         "tt_ok": 0,
     }
     await state.set_data(data)
-    await callback.message.edit_reply_markup(reply_markup=None)
     await callback.answer()
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
     await send_question(callback.message, data)
 
 
@@ -144,16 +161,19 @@ async def training_answer(callback: CallbackQuery, callback_data: TrainAnswerCb,
         return
 
     data = await state.get_data()
-    if callback_data.index != data["tt_i"]:
-        await callback.answer()  # повторное нажатие на уже отвеченный вопрос
+    if callback_data.test_id != data["tt_id"] or callback_data.index != data["tt_i"]:
+        await callback.answer("Кнопка устарела.", show_alert=True)
         return
 
     q = data["tt_q"][data["tt_i"]]
     data["tt_ok"] += int(callback_data.option == q["correct"])
     data["tt_i"] += 1
     await state.update_data(tt_i=data["tt_i"], tt_ok=data["tt_ok"])
-    await callback.message.edit_text(f"{callback.message.text}\n\nТвой ответ: {callback_data.option}")
     await callback.answer()
+    try:
+        await callback.message.edit_text(f"{callback.message.text}\n\nТвой ответ: {callback_data.option}")
+    except TelegramBadRequest:
+        pass
 
     total = len(data["tt_q"])
     if data["tt_i"] < total:
