@@ -3,6 +3,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
@@ -77,6 +78,29 @@ def test_start_clears_lock_on_early_return(db, make_user):
     run(tr.training_start(callback, cb_data, state))
     callback.answer.assert_called_once_with("Недостаточно кадров", show_alert=True)
     # Лок снят — следующая попытка не блокируется фразой "Сначала закончи текущий тест".
+    assert run(state.get_state()) is None
+
+
+def test_start_clears_lock_on_unexpected_exception(db, make_user, monkeypatch):
+    """Round 2: транзиентная ошибка (напр. БД) между локом и стартом теста не должна
+    оставлять пользователя навечно застрявшим в TrainStates.in_test."""
+    tg_id = 113
+    make_user(tg_id=tg_id, points=5)
+    test_id = run(t.create_test("Тест", 0, [q(1)]))
+    state = make_state(tg_id)
+    cb_data = tr.TrainCb(action="start", test_id=test_id)
+    callback = make_callback(tg_id)
+
+    async def boom(_tg_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(tr, "get_user", boom)
+
+    with pytest.raises(RuntimeError):
+        run(tr.training_start(callback, cb_data, state))
+
+    # Исключение пробросилось наружу, но лок снят — следующий тап не увидит
+    # ложное "Сначала закончи текущий тест".
     assert run(state.get_state()) is None
 
 

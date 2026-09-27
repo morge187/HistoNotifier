@@ -108,40 +108,48 @@ async def training_start(callback: CallbackQuery, callback_data: TrainCb, state:
         return
     await state.set_state(TrainStates.in_test)
 
-    user = await get_user(callback.from_user.id)
-    test = await get_test(callback_data.test_id)
-    questions = await get_questions(callback_data.test_id) if test else []
-    if not user or not test or not questions:
-        await state.clear()
-        await callback.answer("Тест не найден.", show_alert=True)
-        return
+    # Всё до успешного старта теста — под защитой: если что-то из этого
+    # (транзиентная ошибка БД и т.п.) выбросит исключение, лок обязательно
+    # снимается, иначе пользователь застрянет с ложным «тест уже идёт».
+    try:
+        user = await get_user(callback.from_user.id)
+        test = await get_test(callback_data.test_id)
+        questions = await get_questions(callback_data.test_id) if test else []
+        if not user or not test or not questions:
+            await state.clear()
+            await callback.answer("Тест не найден.", show_alert=True)
+            return
 
-    decision, left = start_decision(
-        await has_passed(user.id, test.id),
-        await last_failed_at(user.id, test.id),
-        user.points, test.cost, datetime.now(),
-    )
-    if decision == "passed":
-        await state.clear()
-        await callback.answer("✅ Тест уже пройден", show_alert=True)
-        return
-    if decision == "cooldown":
-        await state.clear()
-        await callback.answer(f"Попробуй через {fmt_duration(left)}", show_alert=True)
-        return
-    if decision == "no_points" or not await charge_points(user.id, test.cost):
-        await state.clear()
-        await callback.answer("Недостаточно кадров", show_alert=True)
-        return
+        decision, left = start_decision(
+            await has_passed(user.id, test.id),
+            await last_failed_at(user.id, test.id),
+            user.points, test.cost, datetime.now(),
+        )
+        if decision == "passed":
+            await state.clear()
+            await callback.answer("✅ Тест уже пройден", show_alert=True)
+            return
+        if decision == "cooldown":
+            await state.clear()
+            await callback.answer(f"Попробуй через {fmt_duration(left)}", show_alert=True)
+            return
+        if decision == "no_points" or not await charge_points(user.id, test.cost):
+            await state.clear()
+            await callback.answer("Недостаточно кадров", show_alert=True)
+            return
 
-    data = {
-        "tt_id": test.id,
-        "tt_title": test.title,
-        "tt_q": [question_to_dict(q) for q in questions],
-        "tt_i": 0,
-        "tt_ok": 0,
-    }
-    await state.set_data(data)
+        data = {
+            "tt_id": test.id,
+            "tt_title": test.title,
+            "tt_q": [question_to_dict(q) for q in questions],
+            "tt_i": 0,
+            "tt_ok": 0,
+        }
+        await state.set_data(data)
+    except BaseException:
+        await state.clear()
+        raise
+
     await callback.answer()
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
