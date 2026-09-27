@@ -41,11 +41,12 @@ async def set_user(tg_id): # Асинхронная функция для раб
     
 async def set_status(tg_id, status, points=0): # Поскольку мы изменяем статус конкретного юзера по его tg_id, то этот параметр обязателен.
     async with async_session() as session:
-        user = await session.scalar(select(User).where(User.tg_id == tg_id))
-        if user:
-            user.status = status 
-            user.points = round((user.points if user.points else 0) + points, 2)
-            await session.commit()
+        await session.execute(
+            update(User)
+            .where(User.tg_id == tg_id)
+            .values(status=status, points=func.round(func.coalesce(User.points, 0) + points, 2))
+        )
+        await session.commit()
 
 
 async def save_event(data: dict):
@@ -142,15 +143,13 @@ async def get_event_participants(event_id: int):
 
 async def update_user_points(user_id: int, points: float):
     async with async_session() as session:
-        user = await session.scalar(
-            select(User)
+        result = await session.execute(
+            update(User)
             .where(User.id == user_id)
+            .values(points=func.round(func.coalesce(User.points, 0) + points, 2))
         )
-        if user:
-            user.points = round((user.points or 0) + points, 2)
-            await session.commit()
-            return True
-        return False
+        await session.commit()
+        return result.rowcount == 1
 
 
 async def get_all_events():
@@ -689,22 +688,23 @@ async def clear_user_fine(user_id: int):
 
 async def set_user_points_value(user_id: int, value: float):
     async with async_session() as session:
-        user = await session.scalar(select(User).where(User.id == user_id))
-        if not user:
-            return False
-        user.points = max(0, round(float(value), 2))
+        result = await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(points=max(0, round(float(value), 2)))
+        )
         await session.commit()
-        return True
+        return result.rowcount == 1
 
 async def decrease_user_points(user_id: int, delta: float):
     async with async_session() as session:
-        user = await session.scalar(select(User).where(User.id == user_id))
-        if not user:
-            return False
-        current = user.points or 0
-        user.points = max(0, round(current - float(delta), 2))
+        result = await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(points=func.max(0, func.round(func.coalesce(User.points, 0) - delta, 2)))
+        )
         await session.commit()
-        return True
+        return result.rowcount == 1
 
 async def reset_user_points(user_id: int):
     return await set_user_points_value(user_id, 0)
