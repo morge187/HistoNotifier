@@ -2,82 +2,92 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Реализовать 10 пунктов ТЗ из спеки `docs/superpowers/specs/2026-09-27-bot-global-update-design.md`: личный кабинет, обучение, новое меню, штрафы с историей и оплатой (кадры + Telegram Stars), блокировку, GIF-карты, приветствие, правила, годы диапазоном.
+**Goal:** Реализовать 10 пунктов ТЗ: личный кабинет, обучение с тестами, новое меню, штрафы с историей и оплатой (кадры / Telegram Stars), GIF-карты, приветствие, блокировку, правка правил, годы танков диапазоном.
 
-**Architecture:** aiogram 3 бот на SQLite (SQLAlchemy async). Новая функциональность — в новых модулях (`database/fines.py`, `database/training.py`, `handlers/fines.py`, `handlers/fine_payment.py`, `handlers/cabinet.py`, `handlers/training.py`, `handlers/admin_training.py`, `middlewares/ban.py`). Схема БД расширяется миграцией при старте (`database/migrate.py`). Задачи сгруппированы в волны: задачи одной волны трогают непересекающиеся файлы/участки и выполняются параллельно в отдельных worktree.
+**Architecture:** aiogram 3 + SQLAlchemy async (SQLite). Новая функциональность — в отдельных модулях (`handlers/fines.py`, `handlers/fine_payment.py`, `handlers/cabinet.py`, `handlers/training.py`, `handlers/admin_training.py`, `database/fines.py`, `database/training.py`, `database/migrate.py`, `middlewares/ban.py`). Чистая логика (парсинг, расчёты, рендер текста) — в `utils.py` и покрывается pytest. Схема БД дополняется идемпотентной миграцией при старте.
 
-**Tech Stack:** Python 3.14 (venv `venv_new`), aiogram 3.23, SQLAlchemy 2.0.45 async + aiosqlite, pytest.
+**Tech Stack:** Python 3.14 (`venv_new`), aiogram 3.23, SQLAlchemy 2.0.45, aiosqlite, pytest.
+
+**Spec:** `docs/superpowers/specs/2026-09-27-bot-global-update-design.md`
 
 ## Global Constraints
 
-- Python: `C:/my_space/Projects/work_projects/EventBot/venv_new/Scripts/python.exe` (абсолютный путь — в worktree venv нет). Ниже обозначается `$PY`.
-- Тесты: `$PY -m pytest -q` из корня рабочей копии.
-- Git: добавлять только свои файлы (`git add <path>`). Никогда не `git add -A` / `git add .`. Никогда не коммитить `db.sqlite3`, `__pycache__/`, `venv*/`.
-- Коммит-сообщение заканчивается строкой `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- Файлы `handlers/__init__.py`, `keyboards/userkeyboard.py`, `keyboards/adminkeyboard.py` меняет только Task 15 (интеграция). `app.py` меняет только Task 10.
-- Все тексты интерфейса — на русском, строки из спеки дословно.
-- Каждый админский обработчик (message и callback) проверяет `await is_admin(tg_id)` из `database.requests`; при отказе — «Доступно только администратору.» (callback — `show_alert=True`).
-- Нажатие на устаревшую кнопку (объект не найден/закрыт) → `callback.answer(<текст>, show_alert=True)`, без исключений.
-- Сообщения, где пользовательский текст (ники, описания) подставляется в ответ, отправляются **без** `parse_mode` (или с экранированием `html.escape`, если сообщение уже HTML).
-- `message.text` может быть `None` (стикер/фото) — используйте `(message.text or "").strip()`.
-- Глобальная отмена уже есть: `handlers/start.py::cancel_accept` ловит «отмена/Отмена/Cancel/cancel/Стоп» в любом состоянии (роутер `main` подключён раньше остальных). Новые FSM-сценарии ничего для отмены не делают.
-- Не импортируйте в тестовые модули объекты, чьё имя начинается с `test`/`Test` (pytest попытается их собрать).
+- Интерпретатор: `venv_new/Scripts/python.exe` (Windows). Тесты: `venv_new/Scripts/python.exe -m pytest tests -v`.
+- **Коммитить только свои файлы** через `git add <путь>`. Никогда не добавлять `db.sqlite3`, `__pycache__/`, `venv/`, `venv_new/` (в рабочей копии уже есть посторонние изменения — не трогать их).
+- Коммит-сообщения заканчиваются строкой `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Весь текст для пользователя — на русском.
+- Каждый админский обработчик (сообщение и callback) заново проверяет `is_admin(tg_id)`.
+- Нетекстовые сообщения: использовать `(message.text or "").strip()`, никогда `message.text.strip()` в новом коде.
+- Курс оплаты: 1 кадр = 5 ⭐, звёзды = `ceil(cost * 5)`. Валюта Stars — `"XTR"`.
+- Порог теста — 80%, кулдаун после провала — 24 ч, максимум вопросов — 25, вариантов — ровно 4.
+- Имена, начинающиеся на `test`/`Test`, не использовать для прикладных функций и классов (pytest пытается их собирать): классы моделей — `TrainingTest`, `TrainingQuestion`, `TrainingAttempt`; функция проверки результата — `is_quiz_passed`.
+- Глобальная отмена: слово «отмена» в любом состоянии ловит `cancel_accept` в `handlers/start.py` (роутер `main_router` подключён раньше админского и пользовательского). Новые роутеры подключать **после** `main_router`.
 
-## Карта файлов и владельцы
+## Карта файлов
 
-| Волна | Task | Файлы (создать / изменить) |
+| Файл | Задача | Ответственность |
 |---|---|---|
-| 1 | 1 | `utils.py`, `tests/__init__.py`, `tests/test_utils.py`, `pytest.ini`, `requirements-dev.txt` |
-| 1 | 2 | `database/models.py`, `database/migrate.py`, `tests/conftest.py`, `tests/test_migrate.py` |
-| 2 | 3 | `handlers/usercommands.py` (только обработчики годов танка и их подсказки) |
-| 2 | 4 | `handlers/admin_battles.py`, `handlers/battles.py`, `database/requests.py` (только `create_battle`) |
-| 2 | 5 | `handlers/start.py`, `handlers/usercommands.py` (только правила и `/menu`), `database/requests.py` (только новая `set_onboarded` сразу после `set_name_user`) |
-| 2 | 6 | `database/fines.py`, `tests/test_fines_db.py` |
-| 2 | 7 | `database/training.py`, `tests/test_training_db.py` |
-| 2 | 8 | `database/requests.py` (только новые функции сразу после `get_user_rewards`), `tests/test_rewards_db.py` |
-| 3 | 9 | `handlers/fines.py` (создать), `handlers/admin.py` (удалить) |
-| 3 | 10 | `middlewares/__init__.py`, `middlewares/ban.py`, `tests/test_ban_middleware.py`, `app.py` |
-| 3 | 11 | `handlers/fine_payment.py`, `tests/test_fine_payment.py` |
-| 3 | 13 | `handlers/training.py` |
-| 3 | 14 | `handlers/admin_training.py` |
-| 4 | 12 | `handlers/cabinet.py` (до Task 15) |
-| 4 | 15 | `handlers/__init__.py`, `keyboards/userkeyboard.py`, `keyboards/adminkeyboard.py`, `tests/test_imports.py` |
+| `pytest.ini`, `requirements-dev.txt`, `tests/conftest.py` | 1, 6 | Тестовая инфраструктура, фикстура временной БД |
+| `utils.py` | 1, 11 | Чистые функции: годы, суммы, варианты ответа, звёзды, тесты, рендер кабинета |
+| `database/models.py` | 2 | Новые колонки и таблицы |
+| `database/migrate.py` | 2 | Идемпотентная миграция SQLite |
+| `handlers/usercommands.py` | 3, 5 | Годы танков, правила, `/menu` |
+| `handlers/admin_battles.py`, `handlers/battles.py` | 4 | GIF-карты |
+| `handlers/start.py` | 5 | Приветствие |
+| `database/fines.py` | 6 | Запросы к `fines` |
+| `database/requests.py` | 4, 5, 8, 10 | `create_battle(map_media_type)`, `set_onboarded`, `set_banned`, `get_admin_tg_ids`, награды со статусом |
+| `handlers/fines.py` (вместо `handlers/admin.py`) | 7, 8, 10 | Матч-штрафы, блокировка, статус наград |
+| `middlewares/ban.py` | 8 | Блокировка |
+| `handlers/fine_payment.py` | 9 | Оплата штрафов |
+| `handlers/cabinet.py`, `keyboards/*` | 11, 14 | Кабинет, меню |
+| `database/training.py` | 11, 12 | Тесты |
+| `handlers/training.py` | 13 | Прохождение тестов |
+| `handlers/admin_training.py` | 14 | Конструктор тестов |
 
 ---
 
-## Волна 1
+## Этап 1 — основа, приветствие, GIF, годы, правила
 
-### Task 1: Чистые функции в `utils.py` + инфраструктура pytest
+### Task 1: Тестовая инфраструктура и чистые функции в `utils.py`
 
 **Files:**
-- Modify: `utils.py` (дописать в конец, существующее не трогать)
-- Create: `tests/__init__.py` (пустой), `tests/test_utils.py`, `pytest.ini`, `requirements-dev.txt`
+- Create: `pytest.ini`, `requirements-dev.txt`, `tests/__init__.py` (пустой), `tests/test_utils.py`
+- Modify: `utils.py` (дописать в конец; добавить импорты в начало)
 
-**Interfaces — Produces** (все в `utils.py`):
-- `STARS_PER_CADR = 5`, `PASS_RATIO = 0.8`, `TEST_COOLDOWN = timedelta(hours=24)`
-- `parse_years(text: str | None, min_year: int = 1900, max_year: int | None = None) -> list[int]` — `ValueError` с русским текстом при ошибке
-- `fine_stars(cost: float) -> int`
-- `parse_amount(text: str | None) -> float` — неотрицательное число, ≤ 2 знаков после запятой, `,` = `.`; `ValueError` с русским текстом
-- `parse_options(text: str | None) -> list[str]` — ровно 4 непустые строки; `ValueError`
-- `is_quiz_passed(correct: int, total: int) -> bool`
-- `cooldown_left(last_fail_at: datetime | None, now: datetime) -> timedelta | None`
-- `fmt_duration(delta: timedelta) -> str` — «13 ч 20 мин» / «5 мин»
-- `start_decision(passed: bool, last_fail_at: datetime | None, points: float | None, cost: float | None, now: datetime) -> tuple[str, timedelta | None]` — `"passed" | "cooldown" | "no_points" | "ok"`
-- `render_cabinet(name: str, points: float | None, rewards: list[tuple[str, bool]], tests: list[tuple[str, bool]], fines: list[tuple[str, float]]) -> str`
+**Interfaces:**
+- Produces (в `utils.py`):
+  - `STARS_PER_CADR = 5`, `PASS_RATIO = 0.8`, `TEST_COOLDOWN = timedelta(hours=24)`
+  - `parse_years(text, min_year=1900, max_year=None) -> list[int]` — `ValueError` с текстом для пользователя
+  - `parse_amount(text) -> float` — неотрицательное число, ≤ 2 знаков после запятой; `ValueError`
+  - `parse_options(text) -> list[str]` — ровно 4 непустые строки; `ValueError`
+  - `fine_stars(cost) -> int`
+  - `fine_payload(fine_id: int, user_id: int) -> str`, `parse_fine_payload(payload) -> tuple[int, int] | None`
+  - `is_quiz_passed(correct: int, total: int) -> bool`
+  - `cooldown_left(last_fail_at: datetime | None, now: datetime) -> timedelta | None`
+  - `fmt_duration(delta: timedelta) -> str`
+  - `start_decision(passed: bool, last_fail_at, points, cost, now) -> tuple[str, timedelta | None]` — `"passed" | "cooldown" | "no_points" | "ok"`
+  - `fmt_cost(cost) -> str` — `"бесплатно"` или `"N кадров"`
 
-- [ ] **Step 1: Инфраструктура**
+- [ ] **Step 1: Установить pytest и создать конфиг**
+
+```bash
+venv_new/Scripts/python.exe -m pip install "pytest>=8"
+```
+
+`requirements-dev.txt`:
+```
+-r requirements.txt
+pytest>=8
+```
 
 `pytest.ini`:
 ```ini
 [pytest]
-testpaths = tests
 pythonpath = .
+testpaths = tests
 ```
-`requirements-dev.txt`:
-```
--r requirements.txt
-pytest
-```
+
+`tests/__init__.py` — пустой файл.
 
 - [ ] **Step 2: Написать падающие тесты** — `tests/test_utils.py`:
 
@@ -87,68 +97,94 @@ from datetime import datetime, timedelta
 import pytest
 
 from utils import (
-    parse_years, fine_stars, parse_amount, parse_options, is_quiz_passed,
-    cooldown_left, fmt_duration, start_decision, render_cabinet,
+    cooldown_left, fine_payload, fine_stars, fmt_cost, fmt_duration,
+    is_quiz_passed, parse_amount, parse_fine_payload, parse_options,
+    parse_years, start_decision,
 )
 
-NOW = datetime(2026, 9, 27, 12, 0)
 
+# ── parse_years ──────────────────────────────────────────────────────────────
 
 def test_parse_years_range():
     assert parse_years("1941-1945", max_year=2026) == [1941, 1942, 1943, 1944, 1945]
 
 
-def test_parse_years_mixed_and_dashes():
-    assert parse_years("1939, 1941 – 1943, 1942", max_year=2026) == [1939, 1941, 1942, 1943]
+def test_parse_years_dashes_and_spaces():
+    assert parse_years("1941 – 1942", max_year=2026) == [1941, 1942]
     assert parse_years("1941—1942", max_year=2026) == [1941, 1942]
+
+
+def test_parse_years_mixed_dedup_sorted():
+    assert parse_years("1943, 1939, 1941-1943", max_year=2026) == [1939, 1941, 1942, 1943]
 
 
 def test_parse_years_single():
     assert parse_years("1942", max_year=2026) == [1942]
 
 
-@pytest.mark.parametrize("bad", ["", None, "abc", "1945-1941", "1899", "2030", "41-45", "1941-", ","])
+@pytest.mark.parametrize("bad", ["", "   ", "abc", "1945-1941", "1899", "2030", "41-45", "1941-", None])
 def test_parse_years_errors(bad):
     with pytest.raises(ValueError):
         parse_years(bad, max_year=2026)
 
 
-def test_fine_stars():
-    assert fine_stars(1) == 5
-    assert fine_stars(1.5) == 8
-    assert fine_stars(0.2) == 1       # float noise must not round up to 2
-    assert fine_stars(0.01) == 1
+# ── parse_amount ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw, expected", [("3", 3.0), ("2,5", 2.5), (" 0 ", 0.0), ("1.25", 1.25)])
+def test_parse_amount_ok(raw, expected):
+    assert parse_amount(raw) == expected
 
 
-def test_parse_amount():
-    assert parse_amount("3") == 3
-    assert parse_amount("2,5") == 2.5
-    assert parse_amount(" 0 ") == 0
-    for bad in ["", None, "abc", "-1", "1.234", "nan", "inf"]:
-        with pytest.raises(ValueError):
-            parse_amount(bad)
+@pytest.mark.parametrize("bad", ["", "abc", "-1", "1.234", "nan", "inf", None])
+def test_parse_amount_errors(bad):
+    with pytest.raises(ValueError):
+        parse_amount(bad)
 
 
-def test_parse_options():
-    assert parse_options("a\n b \nc\nd") == ["a", "b", "c", "d"]
-    assert parse_options("a\n\nb\nc\nd\n") == ["a", "b", "c", "d"]
-    for bad in [None, "", "a\nb\nc", "a\nb\nc\nd\ne"]:
-        with pytest.raises(ValueError):
-            parse_options(bad)
+# ── parse_options ────────────────────────────────────────────────────────────
+
+def test_parse_options_ok():
+    assert parse_options(" А \nБ\n\nВ\nГ ") == ["А", "Б", "В", "Г"]
 
 
-def test_is_quiz_passed():
-    assert is_quiz_passed(8, 10)
-    assert not is_quiz_passed(7, 10)
-    assert is_quiz_passed(20, 25)
-    assert not is_quiz_passed(0, 0)
+@pytest.mark.parametrize("bad", ["А\nБ\nВ", "А\nБ\nВ\nГ\nД", "", None])
+def test_parse_options_errors(bad):
+    with pytest.raises(ValueError):
+        parse_options(bad)
+
+
+# ── Stars ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("cost, stars", [(1, 5), (3, 15), (1.5, 8), (0.2, 1), (1.1, 6), (0.01, 1)])
+def test_fine_stars(cost, stars):
+    assert fine_stars(cost) == stars
+
+
+def test_fine_payload_roundtrip():
+    assert parse_fine_payload(fine_payload(12, 7)) == (12, 7)
+
+
+@pytest.mark.parametrize("bad", ["", "fine:1", "x:1:2", "fine:a:2", None])
+def test_parse_fine_payload_bad(bad):
+    assert parse_fine_payload(bad) is None
+
+
+# ── Тесты (обучение) ─────────────────────────────────────────────────────────
+
+def test_is_quiz_passed_threshold():
+    assert is_quiz_passed(8, 10) is True
+    assert is_quiz_passed(7, 10) is False
+    assert is_quiz_passed(20, 25) is True
+    assert is_quiz_passed(19, 25) is False
+    assert is_quiz_passed(0, 0) is False
 
 
 def test_cooldown_left():
-    assert cooldown_left(None, NOW) is None
-    assert cooldown_left(NOW - timedelta(hours=25), NOW) is None
-    assert cooldown_left(NOW - timedelta(hours=24), NOW) is None
-    assert cooldown_left(NOW - timedelta(hours=1), NOW) == timedelta(hours=23)
+    now = datetime(2026, 9, 27, 12, 0)
+    assert cooldown_left(None, now) is None
+    assert cooldown_left(now - timedelta(hours=25), now) is None
+    assert cooldown_left(now - timedelta(hours=24), now) is None
+    assert cooldown_left(now - timedelta(hours=10), now) == timedelta(hours=14)
 
 
 def test_fmt_duration():
@@ -158,81 +194,73 @@ def test_fmt_duration():
 
 
 def test_start_decision_order():
-    recent = NOW - timedelta(hours=1)
-    assert start_decision(True, recent, 0, 10, NOW) == ("passed", None)
-    assert start_decision(False, recent, 100, 0, NOW) == ("cooldown", timedelta(hours=23))
-    assert start_decision(False, None, 1, 5, NOW) == ("no_points", None)
-    assert start_decision(False, None, None, 0, NOW) == ("ok", None)
-    assert start_decision(False, None, 5, 5, NOW) == ("ok", None)
+    now = datetime(2026, 9, 27, 12, 0)
+    recent = now - timedelta(hours=1)
+    assert start_decision(True, recent, 0, 5, now) == ("passed", None)
+    assert start_decision(False, recent, 0, 5, now) == ("cooldown", timedelta(hours=23))
+    assert start_decision(False, None, 4, 5, now) == ("no_points", None)
+    assert start_decision(False, None, None, 0, now) == ("ok", None)
+    assert start_decision(False, None, 5, 5, now) == ("ok", None)
 
 
-def test_render_cabinet_full():
-    text = render_cabinet(
-        "Youra", 42,
-        [("Камуфляж №1", True), ("Камуфляж №2", False)],
-        [("Тест А", True), ("Тест Б", False)],
-        [("Оскорбление", 3), ("Старый штраф", 0)],
-    )
-    assert "👤 Ник: Youra" in text
-    assert "🎞 Кадры: 42" in text
-    assert "Камуфляж №1 — выдан ✅" in text
-    assert "Камуфляж №2 — не выдан ❌" in text
-    assert "Тест А — пройден 🟢" in text
-    assert "Тест Б — не пройден 🔴" in text
-    assert "1. Оскорбление — 3 кадров" in text
-    assert "2. Старый штраф" in text and "Старый штраф —" not in text
-
-
-def test_render_cabinet_empty():
-    text = render_cabinet("Youra", 0, [], [], [])
-    assert "🎁 Награды: нет" in text
-    assert "📚 Тесты: нет тестов" in text
-    assert "⚠️ Штрафы: нет" in text
+def test_fmt_cost():
+    assert fmt_cost(0) == "бесплатно"
+    assert fmt_cost(None) == "бесплатно"
+    assert fmt_cost(5) == "5 кадров"
+    assert fmt_cost(2.5) == "2.5 кадров"
 ```
 
-- [ ] **Step 3: Запустить** `$PY -m pytest tests/test_utils.py -q` — ожидается ImportError.
+- [ ] **Step 3: Запустить — убедиться, что падает**
 
-- [ ] **Step 4: Реализация** — дописать в конец `utils.py` (добавить импорты `import math`, `import re`, `from datetime import datetime, timedelta` в начало файла):
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_utils.py -v`
+Expected: FAIL — `ImportError: cannot import name 'cooldown_left' from 'utils'`
+
+- [ ] **Step 4: Реализовать** — в начало `utils.py` добавить импорты:
 
 ```python
-# ── Общие константы ──────────────────────────────────────────────────────────
+import math
+import re
+from datetime import datetime, timedelta
+```
+
+В конец `utils.py` дописать:
+
+```python
+# ── Константы обновления ─────────────────────────────────────────────────────
+
 STARS_PER_CADR = 5
 PASS_RATIO = 0.8
 TEST_COOLDOWN = timedelta(hours=24)
 
-_YEAR_RANGE = re.compile(r"(\d{4})\s*[-–—]\s*(\d{4})")
-_YEAR = re.compile(r"\d{4}")
+YEAR_HINT = "Например: 1941-1945 или 1939, 1941-1943"
 
 
-def parse_years(text, min_year: int = 1900, max_year: int | None = None) -> list[int]:
-    """«1939, 1941-1945» → [1939, 1941, 1942, 1943, 1944, 1945]."""
+# ── Парсинг ввода ────────────────────────────────────────────────────────────
+
+def parse_years(text, min_year: int = 1900, max_year: int = None) -> list:
+    """«1939, 1941-1943» → [1939, 1941, 1942, 1943]. Ошибка — ValueError с текстом для пользователя."""
     max_year = max_year or datetime.now().year
     years = set()
     for part in str(text or "").split(","):
         part = part.strip()
         if not part:
             continue
-        match = _YEAR_RANGE.fullmatch(part)
+        match = re.fullmatch(r"(\d{4})\s*[-–—]\s*(\d{4})", part)
         if match:
             start, end = int(match[1]), int(match[2])
             if start > end:
-                raise ValueError(f"В диапазоне {part} начало больше конца.")
-        elif _YEAR.fullmatch(part):
+                raise ValueError(f"В диапазоне «{part}» начало больше конца.")
+        elif re.fullmatch(r"\d{4}", part):
             start = end = int(part)
         else:
-            raise ValueError(f"Не понимаю «{part}». Пример: 1941-1945 или 1939, 1941-1943")
+            raise ValueError(f"Не понимаю «{part}». {YEAR_HINT}")
         for year in (start, end):
             if not min_year <= year <= max_year:
                 raise ValueError(f"Год {year} вне диапазона {min_year}–{max_year}.")
         years.update(range(start, end + 1))
     if not years:
-        raise ValueError("Не указано ни одного года.")
+        raise ValueError(f"Не указано ни одного года. {YEAR_HINT}")
     return sorted(years)
-
-
-def fine_stars(cost) -> int:
-    """Стоимость штрафа в звёздах: 1 кадр = 5 ⭐, округление вверх."""
-    return max(1, math.ceil(round(float(cost) * STARS_PER_CADR, 6)))
 
 
 def parse_amount(text) -> float:
@@ -249,19 +277,43 @@ def parse_amount(text) -> float:
     return round(value, 2)
 
 
-def parse_options(text) -> list[str]:
-    """Ровно 4 варианта ответа — по одному на строку."""
+def parse_options(text) -> list:
+    """Ровно 4 непустые строки — варианты ответа."""
     options = [line.strip() for line in str(text or "").splitlines() if line.strip()]
     if len(options) != 4:
         raise ValueError(f"Нужно ровно 4 варианта, каждый с новой строки (сейчас {len(options)}).")
     return options
 
 
+# ── Оплата штрафов ───────────────────────────────────────────────────────────
+
+def fine_stars(cost) -> int:
+    """Стоимость штрафа в звёздах: 1 кадр = 5 ⭐, округление вверх."""
+    return max(1, math.ceil(round(float(cost) * STARS_PER_CADR, 6)))
+
+
+def fine_payload(fine_id: int, user_id: int) -> str:
+    return f"fine:{fine_id}:{user_id}"
+
+
+def parse_fine_payload(payload):
+    parts = str(payload or "").split(":")
+    if len(parts) != 3 or parts[0] != "fine":
+        return None
+    try:
+        return int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+
+
+# ── Обучение ─────────────────────────────────────────────────────────────────
+
 def is_quiz_passed(correct: int, total: int) -> bool:
     return total > 0 and correct / total >= PASS_RATIO
 
 
 def cooldown_left(last_fail_at, now):
+    """Сколько осталось ждать после неудачной попытки; None — ждать не нужно."""
     if last_fail_at is None:
         return None
     left = last_fail_at + TEST_COOLDOWN - now
@@ -274,8 +326,8 @@ def fmt_duration(delta) -> str:
     return f"{hours} ч {minutes} мин" if hours else f"{minutes} мин"
 
 
-def start_decision(passed, last_fail_at, points, cost, now):
-    """Можно ли начать тест: passed → cooldown → no_points → ok."""
+def start_decision(passed: bool, last_fail_at, points, cost, now):
+    """Можно ли начать тест: ('passed'|'cooldown'|'no_points'|'ok', остаток кулдауна)."""
     if passed:
         return "passed", None
     left = cooldown_left(last_fail_at, now)
@@ -286,73 +338,141 @@ def start_decision(passed, last_fail_at, points, cost, now):
     return "ok", None
 
 
-def render_cabinet(name, points, rewards, tests, fines) -> str:
-    """Текст личного кабинета. rewards/tests: (название, флаг); fines: (описание, стоимость)."""
-    emoji, _ = cadr_tier(points)
-    lines = [f"👤 Ник: {name}", f"🎞 Кадры: {fmt_points(points)} {emoji}".rstrip(), ""]
-
-    if rewards:
-        lines.append("🎁 Награды:")
-        lines += [f" • {title} — {'выдан ✅' if issued else 'не выдан ❌'}" for title, issued in rewards]
-    else:
-        lines.append("🎁 Награды: нет")
-    lines.append("")
-
-    if tests:
-        lines.append("📚 Тесты:")
-        lines += [f" • {title} — {'пройден 🟢' if ok else 'не пройден 🔴'}" for title, ok in tests]
-    else:
-        lines.append("📚 Тесты: нет тестов")
-    lines.append("")
-
-    if fines:
-        lines.append("⚠️ Штрафы:")
-        for i, (description, cost) in enumerate(fines, 1):
-            price = f" — {fmt_points(cost)} кадров" if cost else ""
-            lines.append(f" {i}. {description}{price}")
-    else:
-        lines.append("⚠️ Штрафы: нет")
-    return "\n".join(lines)
+def fmt_cost(cost) -> str:
+    return "бесплатно" if not cost else f"{fmt_points(cost)} кадров"
 ```
 
-- [ ] **Step 5: Запустить** `$PY -m pytest tests/test_utils.py -q` — PASS.
+- [ ] **Step 5: Запустить тесты**
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_utils.py -v`
+Expected: все PASS
 
 - [ ] **Step 6: Commit**
+
 ```bash
-git add utils.py tests/__init__.py tests/test_utils.py pytest.ini requirements-dev.txt
-git commit -m "feat: add pure helpers for years, fines, quizzes, cabinet"
+git add pytest.ini requirements-dev.txt tests/__init__.py tests/test_utils.py utils.py
+git commit -m "feat: add pure helpers for years, amounts, stars and quiz logic
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 2: Модели и миграция
+### Task 2: Модели и миграция БД
 
 **Files:**
 - Modify: `database/models.py`
-- Create: `database/migrate.py`, `tests/conftest.py`, `tests/test_migrate.py`
+- Create: `database/migrate.py`, `tests/test_migrate.py`
 
-**Interfaces — Produces:**
-- `database.models`: `User.is_banned: bool`, `User.onboarded: bool`, `User.fine` (nullable, legacy), `UserReward.issued: bool`, `Battle.map_media_type: str | None`, новые модели `Fine`, `TrainingTest` (таблица `tests`), `TrainingQuestion` (`test_questions`), `TrainingAttempt` (`test_attempts`).
-- `database.migrate.migrate(conn) -> None` — принимает **синхронный** SQLAlchemy `Connection` (вызывается через `run_sync`).
-- `tests/conftest.py`: фикстура `db` — временная БД на файле, все таблицы созданы, `async_session` подменён в модулях `database.requests`, `database.fines`, `database.training` (если модуль существует). Возвращает `async_sessionmaker`. Хелпер `run(coro)` = `asyncio.run(coro)`.
+**Interfaces:**
+- Produces:
+  - `User.is_banned: bool`, `User.onboarded: bool`, `User.fine` становится `nullable=True` (legacy, не используется)
+  - `UserReward.issued: bool`
+  - `Battle.map_media_type: str | None` (`"photo"` / `"animation"`)
+  - Модели `Fine`, `TrainingTest`, `TrainingQuestion`, `TrainingAttempt` (поля ниже)
+  - `database.migrate.migrate(conn)` — синхронная, принимает sync `Connection`; вызывается через `conn.run_sync(migrate)`
 
-- [ ] **Step 1: Модели** — в `database/models.py`:
+- [ ] **Step 1: Написать падающие тесты** — `tests/test_migrate.py`:
 
-В `User` заменить строку `fine: Mapped[str] = mapped_column()` и добавить поля:
 ```python
-    fine: Mapped[str] = mapped_column(nullable=True)  # legacy, заменено таблицей fines
+from sqlalchemy import create_engine, inspect, text
+
+from database.migrate import migrate
+from database.models import Base
+
+OLD_SCHEMA = [
+    "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR, tg_id BIGINT, "
+    "status VARCHAR, points FLOAT, fine VARCHAR)",
+    "CREATE TABLE userrewards (id INTEGER PRIMARY KEY, user_id INTEGER, "
+    "reward_id INTEGER, created_at DATETIME)",
+    "CREATE TABLE battles (id INTEGER PRIMARY KEY, name VARCHAR, front VARCHAR, "
+    "date_str VARCHAR, description VARCHAR, map_photo_id VARCHAR, equipment_text VARCHAR)",
+]
+
+
+def make_old_db(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        for ddl in OLD_SCHEMA:
+            conn.execute(text(ddl))
+        conn.execute(text(
+            "INSERT INTO users (id, name, tg_id, status, points, fine) VALUES "
+            "(1, 'A', 11, 'base_user', 5, 'Опоздал'), "
+            "(2, 'B', 22, 'base_user', 0, NULL), "
+            "(3, 'C', 33, 'base_user', 0, '   ')"
+        ))
+        conn.execute(text(
+            "INSERT INTO userrewards (id, user_id, reward_id, created_at) "
+            "VALUES (1, 1, 1, '2026-01-01 00:00:00')"
+        ))
+    return engine
+
+
+def run_startup(engine):
+    with engine.begin() as conn:
+        Base.metadata.create_all(conn)
+        migrate(conn)
+
+
+def columns(engine, table):
+    return {c["name"] for c in inspect(engine).get_columns(table)}
+
+
+def test_adds_missing_columns_with_defaults_for_old_rows(tmp_path):
+    engine = make_old_db(tmp_path)
+    run_startup(engine)
+
+    assert {"is_banned", "onboarded"} <= columns(engine, "users")
+    assert "issued" in columns(engine, "userrewards")
+    assert "map_media_type" in columns(engine, "battles")
+    with engine.connect() as conn:
+        assert tuple(conn.execute(text("SELECT is_banned, onboarded FROM users WHERE id = 1")).one()) == (0, 1)
+        assert conn.execute(text("SELECT issued FROM userrewards WHERE id = 1")).scalar() == 1
+
+
+def test_moves_legacy_fines_once(tmp_path):
+    engine = make_old_db(tmp_path)
+    run_startup(engine)
+    run_startup(engine)
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT user_id, description, cost, status FROM fines")).all()
+    assert [tuple(r) for r in rows] == [(1, "Опоздал", 0, "active")]
+
+
+def test_fresh_database_is_fine(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    run_startup(engine)
+    run_startup(engine)
+    assert {"is_banned", "onboarded"} <= columns(engine, "users")
+    assert {"tests", "test_questions", "test_attempts", "fines"} <= set(inspect(engine).get_table_names())
+```
+
+- [ ] **Step 2: Запустить — убедиться, что падает**
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_migrate.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'database.migrate'`
+
+- [ ] **Step 3: Обновить модели** — в `database/models.py`:
+
+В классе `User` заменить строку `fine: Mapped[str] = mapped_column()` на:
+```python
+    fine: Mapped[str] = mapped_column(nullable=True)  # legacy: штрафы теперь в таблице fines
     is_banned: Mapped[bool] = mapped_column(default=False)
     onboarded: Mapped[bool] = mapped_column(default=False)
 ```
-В `UserReward` добавить:
+
+В классе `UserReward` после `created_at` добавить:
 ```python
     issued: Mapped[bool] = mapped_column(default=False)
 ```
-В `Battle` добавить:
+
+В классе `Battle` после `map_photo_id` добавить:
 ```python
     map_media_type: Mapped[str] = mapped_column(nullable=True)  # photo | animation
 ```
-Перед `async_main` добавить:
+
+Перед `async def async_main()` добавить модели:
 ```python
 class Fine(Base):
     __tablename__ = 'fines'
@@ -363,10 +483,10 @@ class Fine(Base):
     status: Mapped[str] = mapped_column(default='active')  # active | paid | removed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    closed_by = mapped_column(BigInteger, nullable=True)
+    closed_by = mapped_column(BigInteger, nullable=True)  # tg_id админа, снявшего штраф
     paid_with: Mapped[str] = mapped_column(nullable=True)  # cadrs | stars
     stars_amount: Mapped[int] = mapped_column(nullable=True)
-    charge_id: Mapped[str] = mapped_column(nullable=True)
+    charge_id: Mapped[str] = mapped_column(nullable=True)  # telegram_payment_charge_id
 
 
 class TrainingTest(Base):
@@ -379,220 +499,154 @@ class TrainingTest(Base):
 class TrainingQuestion(Base):
     __tablename__ = 'test_questions'
     id: Mapped[int] = mapped_column(primary_key=True)
-    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete='CASCADE'))
+    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete="CASCADE"))
     position: Mapped[int] = mapped_column()
     text: Mapped[str] = mapped_column()
     option_1: Mapped[str] = mapped_column()
     option_2: Mapped[str] = mapped_column()
     option_3: Mapped[str] = mapped_column()
     option_4: Mapped[str] = mapped_column()
-    correct: Mapped[int] = mapped_column()
+    correct: Mapped[int] = mapped_column()  # 1..4
 
 
 class TrainingAttempt(Base):
     __tablename__ = 'test_attempts'
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete='CASCADE'))
+    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete="CASCADE"))
     correct_count: Mapped[int] = mapped_column()
     total: Mapped[int] = mapped_column()
     passed: Mapped[bool] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 ```
-`async_main` заменить на:
+
+- [ ] **Step 4: Создать `database/migrate.py`**
+
 ```python
-async def async_main():
-    from database.migrate import migrate
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(migrate)
-```
+"""Идемпотентная миграция SQLite при старте.
 
-- [ ] **Step 2: Тестовая фикстура** — `tests/conftest.py`:
-```python
-import asyncio
-import importlib
-
-import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
-
-from database.models import Base
-
-DB_MODULES = ("database.requests", "database.fines", "database.training")
-
-
-def run(coro):
-    return asyncio.run(coro)
-
-
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}", poolclass=NullPool)
-    session = async_sessionmaker(engine, expire_on_commit=False)
-
-    async def init():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    run(init())
-    for name in DB_MODULES:
-        try:
-            module = importlib.import_module(name)
-        except ModuleNotFoundError:
-            continue
-        monkeypatch.setattr(module, "async_session", session)
-    yield session
-    run(engine.dispose())
-```
-Примечание: `expire_on_commit=False` только в тестах; продовый `async_sessionmaker(engine)` не меняется, поэтому функции БД должны сами загружать нужные атрибуты до выхода из сессии (возвращать объекты, у которых все колонки уже прочитаны — обычный `select` это обеспечивает, но после `commit` атрибуты истекают: перед `commit` читайте нужные значения или используйте `await session.refresh(obj)` после commit).
-
-- [ ] **Step 3: Падающий тест миграции** — `tests/test_migrate.py`:
-```python
-from sqlalchemy import create_engine, text
-
-from database.migrate import migrate
-from database.models import Base
-
-OLD_SCHEMA = [
-    "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR, tg_id BIGINT, status VARCHAR, points FLOAT, fine VARCHAR)",
-    "CREATE TABLE userrewards (id INTEGER PRIMARY KEY, user_id INTEGER, reward_id INTEGER, created_at DATETIME)",
-    "CREATE TABLE battles (id INTEGER PRIMARY KEY, name VARCHAR, front VARCHAR, date_str VARCHAR, description VARCHAR, map_photo_id VARCHAR, equipment_text VARCHAR)",
-    "INSERT INTO users (id, name, tg_id, status, points, fine) VALUES (1, 'A', 11, 'base_user', 5, 'мат в чате'), (2, 'B', 22, 'base_user', 0, NULL), (3, 'C', 33, 'base_user', 0, '  ')",
-    "INSERT INTO userrewards (id, user_id, reward_id) VALUES (1, 1, 1)",
-    "INSERT INTO battles (id, name, front, date_str, description) VALUES (1, 'X', 'F', 'D', 'desc')",
-]
-
-
-def columns(conn, table):
-    return {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
-
-
-def prepare(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
-    with engine.begin() as conn:
-        for sql in OLD_SCHEMA:
-            conn.execute(text(sql))
-        Base.metadata.create_all(conn)
-        migrate(conn)
-    return engine
-
-
-def test_adds_columns_with_defaults(tmp_path):
-    engine = prepare(tmp_path)
-    with engine.connect() as conn:
-        assert {"is_banned", "onboarded"} <= columns(conn, "users")
-        assert "issued" in columns(conn, "userrewards")
-        assert "map_media_type" in columns(conn, "battles")
-        assert conn.execute(text("SELECT is_banned, onboarded FROM users WHERE id = 1")).one() == (0, 1)
-        assert conn.execute(text("SELECT issued FROM userrewards WHERE id = 1")).scalar() == 1
-        assert conn.execute(text("SELECT map_media_type FROM battles WHERE id = 1")).scalar() is None
-
-
-def test_moves_legacy_fines_once(tmp_path):
-    engine = prepare(tmp_path)
-    with engine.begin() as conn:
-        migrate(conn)  # второй прогон ничего не дублирует
-    with engine.connect() as conn:
-        rows = conn.execute(text("SELECT user_id, description, cost, status FROM fines")).all()
-    assert rows == [(1, "мат в чате", 0, "active")]
-
-
-def test_migrate_is_noop_on_fresh_schema(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
-    with engine.begin() as conn:
-        Base.metadata.create_all(conn)
-        migrate(conn)
-        migrate(conn)
-        assert conn.execute(text("SELECT COUNT(*) FROM fines")).scalar() == 0
-```
-
-- [ ] **Step 4: Запустить** `$PY -m pytest tests/test_migrate.py -q` — FAIL (нет `database.migrate`).
-
-- [ ] **Step 5: Реализация** — `database/migrate.py`:
-```python
-"""Досоздание колонок в существующих таблицах.
-
-create_all не добавляет колонки в уже существующие таблицы, а db.sqlite3
-содержит живые данные — поэтому новые поля добавляем ALTER TABLE.
-DEFAULT задаёт значение для уже существующих строк; новые строки
-получают значение по умолчанию из модели.
+create_all создаёт только новые таблицы, но не добавляет колонки в существующие.
+Здесь добавляем недостающие колонки (DEFAULT задаёт значение для уже
+существующих строк) и один раз переносим старые текстовые штрафы.
 """
 from sqlalchemy import text
 
-COLUMNS = (
+# (таблица, колонка, DDL). DEFAULT — значение для строк, которые уже есть в БД;
+# новые строки получают значение по умолчанию из модели.
+COLUMNS = [
     ("users", "is_banned", "BOOLEAN NOT NULL DEFAULT 0"),
-    ("users", "onboarded", "BOOLEAN NOT NULL DEFAULT 1"),
-    ("userrewards", "issued", "BOOLEAN NOT NULL DEFAULT 1"),
+    ("users", "onboarded", "BOOLEAN NOT NULL DEFAULT 1"),  # старые юзеры приветствие уже не получают
+    ("userrewards", "issued", "BOOLEAN NOT NULL DEFAULT 1"),  # старые награды считаются выданными
     ("battles", "map_media_type", "VARCHAR"),
-)
-
-
-def _columns(conn, table):
-    return {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+]
 
 
 def migrate(conn) -> None:
     for table, column, ddl in COLUMNS:
-        existing = _columns(conn, table)
+        existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
         if existing and column not in existing:
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
     _move_legacy_fines(conn)
 
 
 def _move_legacy_fines(conn) -> None:
-    """Текстовые штрафы из users.fine → таблица fines (один раз на пользователя)."""
-    conn.execute(text("""
-        INSERT INTO fines (user_id, description, cost, status, created_at)
-        SELECT u.id, TRIM(u.fine), 0, 'active', CURRENT_TIMESTAMP
-        FROM users u
-        WHERE u.fine IS NOT NULL AND TRIM(u.fine) != ''
-          AND NOT EXISTS (SELECT 1 FROM fines f WHERE f.user_id = u.id)
-    """))
+    """users.fine → fines (active, cost 0) для тех, у кого ещё нет записей в fines."""
+    conn.execute(text(
+        "INSERT INTO fines (user_id, description, cost, status, created_at) "
+        "SELECT u.id, TRIM(u.fine), 0, 'active', CURRENT_TIMESTAMP FROM users u "
+        "WHERE u.fine IS NOT NULL AND TRIM(u.fine) != '' "
+        "AND NOT EXISTS (SELECT 1 FROM fines f WHERE f.user_id = u.id)"
+    ))
 ```
 
-- [ ] **Step 6: Запустить** `$PY -m pytest -q` — PASS (включая тесты Task 1, если уже слиты).
+- [ ] **Step 5: Подключить миграцию при старте** — в `database/models.py` заменить `async_main`:
 
-- [ ] **Step 7: Проверка на копии живой БД**
+```python
+async def async_main():
+    from database.migrate import migrate
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(migrate)
+```
+
+- [ ] **Step 6: Запустить тесты**
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v`
+Expected: все PASS
+
+- [ ] **Step 7: Проверить на копии боевой БД**
+
 ```bash
-cp db.sqlite3 "$TMP/db_copy.sqlite3"
-$PY -c "
-from sqlalchemy import create_engine, text
+venv_new/Scripts/python.exe - <<'EOF'
+import os, tempfile, shutil
+from sqlalchemy import create_engine, inspect, text
 from database.models import Base
 from database.migrate import migrate
-import os
-e = create_engine('sqlite:///' + os.path.join(os.environ['TMP'], 'db_copy.sqlite3'))
-with e.begin() as c:
-    Base.metadata.create_all(c); migrate(c); migrate(c)
-    print(c.execute(text('select count(*) from fines')).scalar(), 'fines')
-    print(c.execute(text('select count(*) from users where onboarded = 1')).scalar(), 'onboarded users')
-"
+path = os.path.join(tempfile.gettempdir(), "eventbot_db_copy.sqlite3")
+shutil.copy("db.sqlite3", path)
+engine = create_engine(f"sqlite:///{path}")
+for _ in range(2):
+    with engine.begin() as conn:
+        Base.metadata.create_all(conn)
+        migrate(conn)
+with engine.connect() as conn:
+    print("users cols:", [c["name"] for c in inspect(engine).get_columns("users")])
+    print("fines:", conn.execute(text("SELECT count(*) FROM fines")).scalar())
+    print("legacy fines:", conn.execute(text("SELECT count(*) FROM users WHERE fine IS NOT NULL AND TRIM(fine) != ''")).scalar())
+    print("onboarded=1:", conn.execute(text("SELECT count(*) FROM users WHERE onboarded = 1")).scalar(), "of", conn.execute(text("SELECT count(*) FROM users")).scalar())
+EOF
 ```
-Ожидается: без ошибок, числа выводятся. Копию не коммитить.
+Expected: колонки `is_banned`, `onboarded` есть; `fines` == `legacy fines`; все пользователи `onboarded = 1`. Оригинальный `db.sqlite3` не изменён (`git status db.sqlite3` не показывает новых изменений от этого шага — если файл уже был modified до начала работ, это нормально, просто не добавлять его).
 
 - [ ] **Step 8: Commit**
+
 ```bash
-git add database/models.py database/migrate.py tests/conftest.py tests/test_migrate.py
-git commit -m "feat: add fines/training models and startup migration"
+git add database/models.py database/migrate.py tests/test_migrate.py
+git commit -m "feat: add models for fines, training and flags with startup migration
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Волна 2 (после слияния волны 1)
-
 ### Task 3: Годы танка диапазоном
 
-**Files:** Modify `handlers/usercommands.py` — только `process_tank_years`, `process_new_years` и тексты подсказок про годы (строки с «через запятую» в шаге 4/6, в меню редактирования «4. 📅 Годы», в `"Введите новые годы через запятую:"` и `"📅 Введите новые годы создания танка через запятую\nТекущие: ..."`). Правила и `/menu` не трогать (это Task 5).
+**Files:**
+- Modify: `handlers/usercommands.py` (обработчики `process_tank_years` ~стр. 824, `process_new_years` ~стр. 1119, подсказки ~стр. 816, 994, 1049, 1262)
 
-**Interfaces — Consumes:** `utils.parse_years(text) -> list[int]` (ValueError с готовым русским текстом).
+**Interfaces:**
+- Consumes: `utils.parse_years(text) -> list[int]` (ValueError с текстом), `utils.YEAR_HINT`
 
-- [ ] **Step 1:** Добавить `parse_years` в импорт из `utils` в начале файла (`from utils import cadr_message, parse_years`).
-- [ ] **Step 2:** Тело `process_tank_years` после проверки «отмена» заменить на:
+- [ ] **Step 1: Импорт** — в `handlers/usercommands.py` строку `from utils import cadr_message` заменить на:
+
 ```python
+from utils import cadr_message, parse_years, YEAR_HINT
+```
+
+- [ ] **Step 2: Подсказка шага 4 при добавлении** — в `process_tank_type` заменить текст ответа:
+
+```python
+    await message.answer(
+        "✅ Тип сохранен!\n\n"
+        "📅 Шаг 4/6: Введите годы использования танка:\n"
+        f"<i>{YEAR_HINT}</i>",
+        parse_mode="HTML"
+    )
+```
+
+- [ ] **Step 3: Заменить тело `process_tank_years`** целиком:
+
+```python
+@user.message(TankStates.waiting_tank_years)
+async def process_tank_years(message: Message, state: FSMContext):
+    if message.text == "отмена":
+        await state.clear()
+        return
     try:
         valid_years = parse_years(message.text)
     except ValueError as e:
-        await message.answer(f"⚠️ {e}\nВведите годы ещё раз (например: 1941-1945 или 1939, 1941-1943):")
+        await message.answer(f"⚠️ {e}\nВведите годы ещё раз:")
         return
 
     await state.update_data(years=valid_years)
@@ -603,12 +657,23 @@ git commit -m "feat: add fines/training models and startup migration"
     )
     await state.set_state(TankStates.waiting_tank_description)
 ```
-- [ ] **Step 3:** В `process_new_years` блок `try: ... except ValueError: ...` заменить на:
+
+- [ ] **Step 4: Заменить тело `process_new_years`** целиком:
+
 ```python
+@user.message(TankStates.waiting_new_years)
+async def process_new_years(message: Message, state: FSMContext):
+    if message.text == "отмена":
+        await state.set_state(TankStates.nothing)
+        return
+    data = await state.get_data()
+    tank = data.get('selected_tank')
+    choices = data.get('edit_choices', [])
+
     try:
         valid_years = parse_years(message.text)
     except ValueError as e:
-        await message.answer(f"⚠️ {e}\nВведите годы ещё раз (например: 1941-1945 или 1939, 1941-1943):")
+        await message.answer(f"⚠️ {e}\nВведите годы ещё раз:")
         return
 
     success = await update_tank_years(tank.id, valid_years)
@@ -618,46 +683,118 @@ git commit -m "feat: add fines/training models and startup migration"
         await message.answer("❌ Не удалось обновить годы танка.")
         await state.clear()
 ```
-- [ ] **Step 4:** Подсказки:
-  - шаг 4/6: `"📅 Шаг 4/6: Введите годы создания танка:\n"` + `"<i>Например: 1941-1945 или 1939, 1941-1943</i>"` (строку «Или один год» убрать);
-  - меню редактирования: `"4. 📅 Годы\n"`;
-  - `"Введите новые годы через запятую:"` → `"Введите новые годы (например: 1941-1945 или 1939, 1941-1943):"`;
-  - `f"📅 Введите новые годы создания танка через запятую\nТекущие: {years_str}:"` → `f"📅 Введите новые годы создания танка (например: 1941-1945)\nТекущие: {years_str}:"`.
-  Строки «Введите номера через запятую» (выбор полей) НЕ менять.
-- [ ] **Step 5:** `$PY -c "import handlers.usercommands"` — без ошибок; `$PY -m pytest -q` — PASS. Удалить импорт `datetime`, только если он больше нигде в файле не используется (проверить grep).
-- [ ] **Step 6: Commit** `git add handlers/usercommands.py && git commit -m "feat: accept tank year ranges like 1941-1945"`
+
+- [ ] **Step 5: Остальные подсказки**
+  - `"4. 📅 Годы (через запятую)\n"` → `"4. 📅 Годы\n"`
+  - `"Введите новые годы через запятую:",` → `f"Введите новые годы. {YEAR_HINT}:",`
+  - `f"📅 Введите новые годы создания танка через запятую\nТекущие: {years_str}:",` → `f"📅 Введите новые годы использования танка ({YEAR_HINT})\nТекущие: {years_str}:",`
+  - Строки `"🔢 <b>Введите номера через запятую:</b>"` и `"⚠️ Неверный формат. Введите номера через запятую:"` — **не трогать** (это выбор полей, не годы).
+
+- [ ] **Step 6: Проверить импорт модуля и тесты**
+
+Run: `venv_new/Scripts/python.exe -c "import handlers" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: без ошибок импорта, тесты PASS. `grep -n "через запятую" handlers/usercommands.py` показывает только две строки про номера полей.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add handlers/usercommands.py
+git commit -m "feat: accept tank years as ranges like 1941-1945
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
 ### Task 4: GIF-карты сражений
 
-**Files:** Modify `handlers/admin_battles.py`, `handlers/battles.py`, `database/requests.py` (только функция `create_battle`).
+**Files:**
+- Modify: `handlers/admin_battles.py` (шаг 4 создания ~стр. 95–122, подсказки ~стр. 348, 367, редактирование ~стр. 434–441, сохранение ~стр. 151)
+- Modify: `handlers/battles.py` (`show_battle_detail` ~стр. 150)
+- Modify: `database/requests.py` (`create_battle`)
 
-**Interfaces — Consumes:** `Battle.map_media_type` (Task 2).
+**Interfaces:**
+- Produces: `create_battle(..., map_photo_id=None, map_media_type=None, equipment_text=None)`; `admin_battles.map_media(message) -> tuple[str, str]`
 
-- [ ] **Step 1:** `database/requests.py::create_battle` — добавить параметр `map_media_type: str = None` после `map_photo_id` и передать `map_media_type=map_media_type` в `Battle(...)`.
-- [ ] **Step 2:** В `handlers/admin_battles.py` рядом с состояниями добавить хелпер:
+- [ ] **Step 1: `create_battle` принимает тип** — в `database/requests.py` сигнатура и конструктор:
+
 ```python
-def _map_media(message: Message) -> tuple[str, str]:
-    """file_id и тип карты: GIF приходит как animation, фото — как photo."""
+async def create_battle(
+    name: str,
+    front: str,
+    date_str: str,
+    description: str,
+    map_photo_id: str = None,
+    equipment_text: str = None,
+    map_media_type: str = None,
+) -> bool:
+    async with async_session() as session:
+        try:
+            battle = Battle(
+                name=name,
+                front=front,
+                date_str=date_str,
+                description=description,
+                map_photo_id=map_photo_id,
+                map_media_type=map_media_type,
+                equipment_text=equipment_text,
+            )
+```
+(остальное тело без изменений)
+
+- [ ] **Step 2: Хелпер и шаг 4 создания** — в `handlers/admin_battles.py` после определения классов состояний добавить:
+
+```python
+def map_media(message: Message) -> tuple:
+    """(file_id, тип) для карты: GIF приходит как animation, картинка — как photo."""
     if message.animation:
         return message.animation.file_id, "animation"
     return message.photo[-1].file_id, "photo"
 ```
-- [ ] **Step 3:** Создание: декоратор `@admin_battles.message(CreateBattle.map_photo, F.content_type == ContentType.PHOTO)` → `@admin_battles.message(CreateBattle.map_photo, F.photo | F.animation)`; тело:
+
+Заменить обработчики шага 4:
+
 ```python
-    file_id, media_type = _map_media(message)
+@admin_battles.message(CreateBattle.map_photo, F.photo | F.animation)
+async def get_battle_map(message: Message, state: FSMContext):
+    file_id, media_type = map_media(message)
     await state.update_data(map_photo_id=file_id, map_media_type=media_type)
+    await message.answer(
+        "✅ Карта сохранена!\n\n"
+        "Шаг 5/6: Введите описание сражения (история, план боя и т.д.):"
+    )
+    await state.set_state(CreateBattle.description)
+
+
+@admin_battles.message(CreateBattle.map_photo)
+async def wrong_map_format(message: Message, state: FSMContext):
+    await message.answer("Пожалуйста, отправьте фото или GIF (карту сражения):")
 ```
-(дальше без изменений). В вызов `create_battle(...)` добавить `map_media_type=data.get("map_media_type")`.
-- [ ] **Step 4:** Редактирование: `@admin_battles.message(EditBattle.new_map, F.content_type == ContentType.PHOTO)` → `@admin_battles.message(EditBattle.new_map, F.photo | F.animation)`; тело:
+
+В подсказке шага 3→4: `"Шаг 4/6: Отправьте карту сражения (фото):"` → `"Шаг 4/6: Отправьте карту сражения (фото или GIF):"`.
+
+В вызове `create_battle(...)` в `get_battle_equipment` добавить аргумент `map_media_type=data.get("map_media_type"),`.
+
+- [ ] **Step 3: Редактирование карты**
+
 ```python
-    file_id, media_type = _map_media(message)
+@admin_battles.message(EditBattle.new_map, F.photo | F.animation)
+async def edit_new_map(message: Message, state: FSMContext):
+    file_id, media_type = map_media(message)
     await _apply_edit(message, state, map_photo_id=file_id, map_media_type=media_type)
+
+
+@admin_battles.message(EditBattle.new_map)
+async def edit_new_map_wrong(message: Message):
+    await message.answer("Пожалуйста, отправьте фото или GIF (карту):")
 ```
-- [ ] **Step 5:** Тексты: «(фото)» → «(фото или GIF)» во всех подсказках про карту (`"Шаг 4/6: Отправьте карту сражения (фото или GIF):"`, `"4 — Карту (фото или GIF)\n"`, `"Отправьте новую карту (фото или GIF):"`); ошибки: `"Пожалуйста, отправьте фото или GIF (карту сражения):"`, `"Пожалуйста, отправьте фото или GIF (карту):"`.
-- [ ] **Step 6:** `handlers/battles.py::show_battle_detail`:
+
+Подсказки: `"4 — Карту (фото)\n"` → `"4 — Карту (фото или GIF)\n"`; `"4": "Отправьте новую карту (фото):",` → `"4": "Отправьте новую карту (фото или GIF):",`.
+
+- [ ] **Step 4: Показ карты** — в `handlers/battles.py`, `show_battle_detail`:
+
 ```python
+    photo_msg_id = 0
     if battle.map_photo_id:
         if battle.map_media_type == "animation":
             sent = await callback.message.answer_animation(animation=battle.map_photo_id)
@@ -665,18 +802,108 @@ def _map_media(message: Message) -> tuple[str, str]:
             sent = await callback.message.answer_photo(photo=battle.map_photo_id)
         photo_msg_id = sent.message_id
 ```
-- [ ] **Step 7:** `$PY -c "import handlers.admin_battles, handlers.battles"`; `$PY -m pytest -q` — PASS.
-- [ ] **Step 8: Commit** `git add handlers/admin_battles.py handlers/battles.py database/requests.py && git commit -m "feat: allow GIF battle maps"`
+
+- [ ] **Step 5: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import handlers" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: без ошибок, тесты PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add handlers/admin_battles.py handlers/battles.py database/requests.py
+git commit -m "feat: allow GIF animations as battle maps
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
-### Task 5: Приветствие, `/menu`, правила
+### Task 5: Приветствие после регистрации, `/menu`, правила
 
-**Files:** Modify `handlers/start.py`; `handlers/usercommands.py` (только функция правил и `menu`); `database/requests.py` (только новая функция сразу после `set_name_user`).
+**Files:**
+- Modify: `handlers/start.py`, `handlers/usercommands.py` (`menu`, текст правил), `database/requests.py`
+- Test: `tests/conftest.py` (создать), `tests/test_requests_users.py` (создать)
 
-**Interfaces — Produces:** `database.requests.set_onboarded(tg_id: int) -> None`; `handlers.start.WELCOME_TEXT: str`; callback data `"onboard_ok"`.
+**Interfaces:**
+- Produces: `database.requests.set_onboarded(tg_id) -> None`; `handlers.start.WELCOME_TEXT`; callback `"onboard_ok"`; фикстуры `db` и `make_user` в `tests/conftest.py`
 
-- [ ] **Step 1:** `database/requests.py`, сразу после `set_name_user`:
+- [ ] **Step 1: Фикстуры временной БД** — `tests/conftest.py`:
+
+```python
+import asyncio
+import importlib
+
+import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from database.models import Base, User
+
+# Модули, у которых подменяем async_session на временную БД.
+# Модуль, которого ещё нет (создаётся в поздних задачах), пропускается.
+DB_MODULES = ("database.requests", "database.fines", "database.training")
+
+
+@pytest.fixture
+def db(tmp_path, monkeypatch):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}", poolclass=NullPool)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def init():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(init())
+    for name in DB_MODULES:
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError:
+            continue
+        monkeypatch.setattr(module, "async_session", session_maker)
+    yield session_maker
+    asyncio.run(engine.dispose())
+
+
+@pytest.fixture
+def make_user(db):
+    def _make(name="A", tg_id=1, status="base_user", points=0.0, **extra) -> int:
+        async def go():
+            async with db() as session:
+                user = User(name=name, tg_id=tg_id, status=status, points=points, **extra)
+                session.add(user)
+                await session.commit()
+                return user.id
+        return asyncio.run(go())
+    return _make
+```
+
+- [ ] **Step 2: Падающий тест** — `tests/test_requests_users.py`:
+
+```python
+import asyncio
+
+from database import requests as r
+
+
+def test_set_onboarded(make_user):
+    make_user(tg_id=100, onboarded=False)
+    asyncio.run(r.set_onboarded(100))
+    assert asyncio.run(r.get_user(100)).onboarded is True
+
+
+def test_new_user_is_not_onboarded(db):
+    asyncio.run(r.set_user(200))
+    user = asyncio.run(r.get_user(200))
+    assert user.onboarded is False
+    assert user.is_banned is False
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_requests_users.py -v`
+Expected: FAIL — `AttributeError: module 'database.requests' has no attribute 'set_onboarded'`
+
+- [ ] **Step 3: `set_onboarded`** — в `database/requests.py` после `set_name_user`:
+
 ```python
 async def set_onboarded(tg_id):
     async with async_session() as session:
@@ -685,7 +912,24 @@ async def set_onboarded(tg_id):
             user.onboarded = True
             await session.commit()
 ```
-- [ ] **Step 2:** `handlers/start.py` — импорты: добавить `CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove` из `aiogram.types`, `set_onboarded` из `database.requests`. Константы:
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v` → PASS.
+
+- [ ] **Step 4: Приветствие** — `handlers/start.py`.
+
+Импорты заменить на:
+```python
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.filters import CommandStart, Command
+from aiogram import Router
+from aiogram import F
+from keyboards import userboard, adminboard
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from database.requests import set_user, set_status, set_name_user, get_user, check_name_exists, set_onboarded
+```
+
+После `array_exchange = [...]` добавить:
 ```python
 WELCOME_TEXT = (
     "📖 Как читать обозначения в боте:\n\n"
@@ -696,41 +940,54 @@ WELCOME_TEXT = (
     "напиши команду /menu — интерфейс восстановится."
 )
 
+ONBOARD_CALLBACK = "onboard_ok"
 onboard_kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Понятно!", callback_data="onboard_ok")]
+    [InlineKeyboardButton(text="Понятно!", callback_data=ONBOARD_CALLBACK)]
 ])
 
 
 async def send_welcome(message: Message):
     await message.answer(WELCOME_TEXT, reply_markup=onboard_kb)
 ```
-- [ ] **Step 3:** `start_command`: вместо `if data.name != None: return` —
+
+В `start_command` заменить
+```python
+    if data.name != None:
+        return
+```
+на
 ```python
     if data.name is not None:
         if not data.onboarded:
             await send_welcome(message)
         return
 ```
-- [ ] **Step 4:** `set_name_to_user`: после `await set_name_user(...)` и `await state.clear()` —
+
+В `set_name_to_user` заменить хвост после `await state.clear()` (последние строки функции):
 ```python
+    await set_name_user(message.from_user.id, new_nick)
+    await state.clear()
     user = await get_user(message.from_user.id)
     if not user.onboarded:
         await message.answer(f'✅ Ваш ник "{new_nick}" успешно сохранён', reply_markup=ReplyKeyboardRemove())
         await send_welcome(message)
         return
+    await message.answer(f'✅ Ваш ник "{new_nick}" успешно сохранён',
+                         reply_markup=await board_for(message.from_user.id))
 ```
-затем существующий ответ с клавиатурой.
-- [ ] **Step 5:** Новый обработчик:
+
+Перед `cancel_accept` добавить:
 ```python
-@start.callback_query(F.data == "onboard_ok")
+@start.callback_query(F.data == ONBOARD_CALLBACK)
 async def onboard_ok(callback: CallbackQuery):
     await set_onboarded(callback.from_user.id)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Добро пожаловать! Меню открыто 👇",
-                                  reply_markup=await board_for(callback.from_user.id))
+    await callback.message.answer("Меню открыто 👇", reply_markup=await board_for(callback.from_user.id))
     await callback.answer()
 ```
-- [ ] **Step 6:** `handlers/usercommands.py`: строку `"  - Участникам клана [Т-70В]\n"` → `"  - Участникам кланов [Т-70В] и [RENWA]\n"`. Функцию `menu`:
+
+- [ ] **Step 5: `/menu`** — в `handlers/usercommands.py` заменить функцию `menu`:
+
 ```python
 @user.message(Command('menu'))
 async def menu(message: Message):
@@ -738,113 +995,145 @@ async def menu(message: Message):
     if not user or not user.name:
         await message.answer('Сначала зарегистрируйся: /start')
         return
-    board = adminboard if user.status == 'admin' else userboard
-    await message.answer('Меню', reply_markup=board)
+    await message.answer('Меню', reply_markup=adminboard if user.status == 'admin' else userboard)
 ```
-- [ ] **Step 7:** `$PY -c "import handlers.start, handlers.usercommands"`; `$PY -m pytest -q` — PASS.
-- [ ] **Step 8: Commit** `git add handlers/start.py handlers/usercommands.py database/requests.py && git commit -m "feat: welcome instruction after registration, fix /menu, update rules"`
+
+- [ ] **Step 6: Правила** — в тексте правил заменить `"  - Участникам клана [Т-70В]\n"` на `"  - Участникам кланов [Т-70В] и [RENWA]\n"`.
+
+- [ ] **Step 7: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import handlers" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add handlers/start.py handlers/usercommands.py database/requests.py tests/conftest.py tests/test_requests_users.py
+git commit -m "feat: onboarding message after registration, fix /menu, add RENWA to rules
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
-### Task 6: `database/fines.py`
+## Этап 2 — штрафы, блокировка, оплата
 
-**Files:** Create `database/fines.py`, `tests/test_fines_db.py`.
+### Task 6: Запросы к таблице штрафов
 
-**Interfaces — Produces** (все async, модуль импортирует `async_session` из `database.models` на уровне модуля — так его подменяет фикстура):
-- `add_fine(user_id: int, description: str, cost: float) -> Fine | None` (None — нет пользователя)
-- `get_fine(fine_id: int) -> Fine | None`
-- `get_active_fines(user_id: int) -> list[Fine]` — порядок по `id`
-- `get_users_with_active_fines(event_id: int | None = None) -> list[tuple[User, list[Fine]]]` — только пользователи с `name`, порядок по `User.name`, `Fine.id`; с `event_id` — только участники ивента (через подзапрос `UserEvent`, без дублей)
-- `remove_fine(fine_id: int, admin_tg_id: int) -> bool` — только `active` → `removed`
-- `pay_fine_with_cadrs(fine_id: int, user_id: int) -> str` — `"ok" | "not_found" | "not_active" | "free" | "no_points"`
-- `mark_fine_paid_stars(fine_id: int, stars: int, charge_id: str) -> bool` — True, если штраф был `active`
-- `set_banned(user_id: int, banned: bool) -> bool`
-- `get_admin_tg_ids() -> list[int]`
+**Files:**
+- Create: `database/fines.py`, `tests/test_fines_db.py`
 
-- [ ] **Step 1: Тесты** — `tests/test_fines_db.py`:
+**Interfaces:**
+- Consumes: `database.models.Fine`, `User`, `UserEvent`, `async_session`
+- Produces (`database/fines.py`):
+  - `add_fine(user_id: int, description: str, cost: float) -> Fine | None`
+  - `get_fine(fine_id: int) -> Fine | None`
+  - `get_active_fines(user_id: int) -> list[Fine]` (по `created_at`, `id`)
+  - `get_users_with_active_fines(event_id: int | None = None) -> list[tuple[User, list[Fine]]]` (по имени)
+  - `remove_fine(fine_id: int, admin_tg_id: int) -> bool`
+  - `pay_fine_with_cadrs(fine_id: int, user_id: int) -> str` — `"ok" | "not_found" | "not_active" | "free" | "no_points"`
+  - `mark_fine_paid_stars(fine_id: int, stars: int, charge_id: str) -> bool`
+
+- [ ] **Step 1: Падающие тесты** — `tests/test_fines_db.py`:
+
 ```python
-from database import fines
-from database.models import User, UserEvent
-from tests.conftest import run
+import asyncio
+
+from database import fines as f
+from database.models import UserEvent
 
 
-async def _users(session_maker):
-    async with session_maker() as s:
-        s.add_all([
-            User(id=1, name="Bob", tg_id=11, status="base_user", points=10),
-            User(id=2, name="Alice", tg_id=22, status="base_user", points=1),
-            User(id=3, name="Admin", tg_id=33, status="admin", points=0),
-            UserEvent(user_id=1, event_id=7),
-            UserEvent(user_id=1, event_id=7),
-        ])
-        await s.commit()
+def run(coro):
+    return asyncio.run(coro)
 
 
-def test_add_and_list(db):
-    run(_users(db))
-    f1 = run(fines.add_fine(1, "мат", 3))
-    run(fines.add_fine(2, "флуд", 0))
-    assert f1.id and f1.status == "active" and f1.cost == 3
-    assert run(fines.add_fine(999, "x", 1)) is None
-    assert [f.description for f in run(fines.get_active_fines(1))] == ["мат"]
-    grouped = run(fines.get_users_with_active_fines())
-    assert [(u.name, [f.description for f in fs]) for u, fs in grouped] == [("Alice", ["флуд"]), ("Bob", ["мат"])]
-    by_event = run(fines.get_users_with_active_fines(7))
-    assert [(u.name, len(fs)) for u, fs in by_event] == [("Bob", 1)]
+def test_add_and_list_active(make_user):
+    uid = make_user(points=10)
+    fine = run(f.add_fine(uid, "Опоздал", 3))
+    assert fine.id and fine.status == "active" and fine.cost == 3
+    assert [x.id for x in run(f.get_active_fines(uid))] == [fine.id]
 
 
-def test_remove_keeps_history(db):
-    run(_users(db))
-    f = run(fines.add_fine(1, "мат", 3))
-    assert run(fines.remove_fine(f.id, 33)) is True
-    assert run(fines.remove_fine(f.id, 33)) is False
-    stored = run(fines.get_fine(f.id))
-    assert stored.status == "removed" and stored.closed_by == 33 and stored.closed_at
-    assert run(fines.get_active_fines(1)) == []
+def test_add_fine_unknown_user(db):
+    assert run(f.add_fine(999, "x", 1)) is None
 
 
-def test_pay_with_cadrs(db):
-    run(_users(db))
-    f = run(fines.add_fine(1, "мат", 3))
-    expensive = run(fines.add_fine(2, "флуд", 5))
-    free = run(fines.add_fine(2, "старый", 0))
-    assert run(fines.pay_fine_with_cadrs(f.id, 2)) == "not_found"       # чужой штраф
-    assert run(fines.pay_fine_with_cadrs(expensive.id, 2)) == "no_points"
-    assert run(fines.pay_fine_with_cadrs(free.id, 2)) == "free"
-    assert run(fines.pay_fine_with_cadrs(f.id, 1)) == "ok"
-    assert run(fines.pay_fine_with_cadrs(f.id, 1)) == "not_active"
-    paid = run(fines.get_fine(f.id))
-    assert paid.status == "paid" and paid.paid_with == "cadrs"
-
-    async def points():
-        async with db() as s:
-            return (await s.get(User, 1)).points
-    assert run(points()) == 7
+def test_remove_keeps_history(make_user):
+    uid = make_user()
+    fine = run(f.add_fine(uid, "x", 1))
+    assert run(f.remove_fine(fine.id, admin_tg_id=555)) is True
+    assert run(f.remove_fine(fine.id, admin_tg_id=555)) is False
+    stored = run(f.get_fine(fine.id))
+    assert stored.status == "removed" and stored.closed_by == 555 and stored.closed_at
+    assert run(f.get_active_fines(uid)) == []
 
 
-def test_pay_with_stars(db):
-    run(_users(db))
-    f = run(fines.add_fine(1, "мат", 3))
-    assert run(fines.mark_fine_paid_stars(f.id, 15, "ch_1")) is True
-    assert run(fines.mark_fine_paid_stars(f.id, 15, "ch_2")) is False
-    paid = run(fines.get_fine(f.id))
-    assert (paid.status, paid.paid_with, paid.stars_amount, paid.charge_id) == ("paid", "stars", 15, "ch_1")
+def test_pay_with_cadrs(make_user):
+    uid = make_user(points=10)
+    fine = run(f.add_fine(uid, "x", 3))
+    assert run(f.pay_fine_with_cadrs(fine.id, uid)) == "ok"
+    stored = run(f.get_fine(fine.id))
+    assert stored.status == "paid" and stored.paid_with == "cadrs"
+    from database.requests import get_user_by_id
+    assert run(get_user_by_id(uid)).points == 7
+    assert run(f.pay_fine_with_cadrs(fine.id, uid)) == "not_active"
 
 
-def test_ban_and_admins(db):
-    run(_users(db))
-    assert run(fines.set_banned(1, True)) is True
-    assert run(fines.set_banned(999, True)) is False
-    assert run(fines.get_admin_tg_ids()) == [33]
+def test_pay_with_cadrs_errors(make_user):
+    poor = make_user(name="P", tg_id=2, points=1)
+    other = make_user(name="O", tg_id=3, points=100)
+    costly = run(f.add_fine(poor, "x", 3))
+    free = run(f.add_fine(poor, "legacy", 0))
+    assert run(f.pay_fine_with_cadrs(costly.id, poor)) == "no_points"
+    assert run(f.pay_fine_with_cadrs(free.id, poor)) == "free"
+    assert run(f.pay_fine_with_cadrs(costly.id, other)) == "not_found"
+    assert run(f.pay_fine_with_cadrs(9999, poor)) == "not_found"
+    assert run(f.get_fine(costly.id)).status == "active"
+
+
+def test_mark_paid_stars_once(make_user):
+    uid = make_user()
+    fine = run(f.add_fine(uid, "x", 2))
+    assert run(f.mark_fine_paid_stars(fine.id, 10, "ch_1")) is True
+    assert run(f.mark_fine_paid_stars(fine.id, 10, "ch_2")) is False
+    stored = run(f.get_fine(fine.id))
+    assert (stored.status, stored.paid_with, stored.stars_amount, stored.charge_id) == ("paid", "stars", 10, "ch_1")
+
+
+def test_users_with_active_fines_grouped_and_by_event(db, make_user):
+    a = make_user(name="Бета", tg_id=1)
+    b = make_user(name="Альфа", tg_id=2)
+    make_user(name="Чистый", tg_id=3)
+    run(f.add_fine(a, "a1", 1))
+    run(f.add_fine(a, "a2", 1))
+    removed = run(f.add_fine(b, "b1", 1))
+    run(f.add_fine(b, "b2", 1))
+    run(f.remove_fine(removed.id, 1))
+
+    rows = run(f.get_users_with_active_fines())
+    assert [(u.name, [x.description for x in fs]) for u, fs in rows] == [("Альфа", ["b2"]), ("Бета", ["a1", "a2"])]
+
+    async def join_event():
+        async with db() as session:
+            session.add_all([UserEvent(user_id=a, event_id=7), UserEvent(user_id=a, event_id=7)])
+            await session.commit()
+    run(join_event())
+    rows = run(f.get_users_with_active_fines(event_id=7))
+    assert [(u.name, len(fs)) for u, fs in rows] == [("Бета", 2)]
 ```
-- [ ] **Step 2:** `$PY -m pytest tests/test_fines_db.py -q` — FAIL.
-- [ ] **Step 3: Реализация** `database/fines.py`:
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_fines_db.py -v`
+Expected: FAIL — `ImportError: cannot import name 'fines' from 'database'`
+
+- [ ] **Step 2: Реализовать** — `database/fines.py`:
+
 ```python
+"""Матч-штрафы: выдача, снятие, оплата. Записи не удаляются — это история."""
 from datetime import datetime
 
 from sqlalchemy import select, update
 
-from database.models import async_session, Fine, User, UserEvent
+from database.models import Fine, User, UserEvent, async_session
 
 
 async def add_fine(user_id: int, description: str, cost: float):
@@ -866,23 +1155,28 @@ async def get_fine(fine_id: int):
 async def get_active_fines(user_id: int) -> list:
     async with async_session() as session:
         result = await session.scalars(
-            select(Fine).where(Fine.user_id == user_id, Fine.status == "active").order_by(Fine.id)
+            select(Fine)
+            .where(Fine.user_id == user_id, Fine.status == "active")
+            .order_by(Fine.created_at, Fine.id)
         )
-        return list(result)
+        return list(result.all())
 
 
-async def get_users_with_active_fines(event_id: int | None = None) -> list:
+async def get_users_with_active_fines(event_id: int = None) -> list:
+    """[(User, [Fine, ...]), ...] — только игроки с ником и активными штрафами."""
     stmt = (
         select(User, Fine)
         .join(Fine, Fine.user_id == User.id)
         .where(Fine.status == "active", User.name.isnot(None))
-        .order_by(User.name, Fine.id)
+        .order_by(User.name, Fine.created_at, Fine.id)
     )
     if event_id is not None:
         participants = select(UserEvent.user_id).where(UserEvent.event_id == event_id)
         stmt = stmt.where(User.id.in_(participants))
+
     async with async_session() as session:
         rows = (await session.execute(stmt)).all()
+
     grouped = {}
     for user, fine in rows:
         grouped.setdefault(user.id, (user, []))[1].append(fine)
@@ -901,6 +1195,7 @@ async def remove_fine(fine_id: int, admin_tg_id: int) -> bool:
 
 
 async def pay_fine_with_cadrs(fine_id: int, user_id: int) -> str:
+    """'ok' | 'not_found' | 'not_active' | 'free' | 'no_points'."""
     async with async_session() as session:
         fine = await session.get(Fine, fine_id)
         if not fine or fine.user_id != user_id:
@@ -912,7 +1207,8 @@ async def pay_fine_with_cadrs(fine_id: int, user_id: int) -> str:
         user = await session.get(User, user_id)
         if (user.points or 0) < fine.cost:
             return "no_points"
-        # Условный UPDATE защищает от двойного нажатия: второй не найдёт active
+
+        # Условный UPDATE защищает от двойного нажатия: второй запрос не найдёт active
         result = await session.execute(
             update(Fine)
             .where(Fine.id == fine_id, Fine.status == "active")
@@ -936,507 +1232,583 @@ async def mark_fine_paid_stars(fine_id: int, stars: int, charge_id: str) -> bool
         )
         await session.commit()
         return result.rowcount == 1
+```
+
+- [ ] **Step 3: Запустить тесты**
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v`
+Expected: все PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add database/fines.py tests/test_fines_db.py
+git commit -m "feat: fines table queries with history, cadr and stars payment
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: `handlers/fines.py` — перенос матч-штрафов, штраф со стоимостью, снятие
+
+**Контекст:** в `handlers/admin.py` `admin = Router()` объявлен дважды (стр. 17 и 232). Обработчики первой половины файла (создание ивента) висят на первом роутере, который нигде не подключён, — это мёртвый код (живое создание ивента — в `handlers/events.py`). Экспортируется второй роутер с кодом штрафов. Поэтому `handlers/admin.py` **удаляется целиком**, код штрафов переписывается в `handlers/fines.py`. Нельзя оставлять первую половину файла: она «оживёт» и перехватит кнопку «Добавить ивент».
+
+**Files:**
+- Create: `handlers/fines.py`
+- Delete: `handlers/admin.py`
+- Modify: `handlers/__init__.py`
+
+**Interfaces:**
+- Consumes: `database.fines.*` (Task 6), `utils.parse_amount`, `utils.fmt_points`
+- Produces (используются в Task 8 и 10):
+  - `fines_router`, `FINES_BUTTONS = ("Матч-штрафы", "матч-штрафы")`
+  - `FineAdminCb(action: str, user_id: int)`, `FineStates`, `BackCb`
+  - `render_admin_user(user) -> str` (async), `kb_admin_user_actions(user)` — принимает объект `User`
+  - `send_admin_card(message, user, prefix="")` (async), `deny_non_admin(message, state) -> bool` (async)
+
+- [ ] **Step 1: Создать `handlers/fines.py`**
+
+```python
+"""Матч-штрафы: поиск игроков, карточка игрока для админа, штрафы и очки."""
+from aiogram import Router, F
+from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from database.fines import add_fine, get_active_fines, get_users_with_active_fines, remove_fine
+from database.requests import (
+    decrease_user_points,
+    get_all_events,
+    get_all_users_ordered,
+    get_event_by_index,
+    get_event_participants,
+    get_user_by_id,
+    get_user_by_name,
+    is_admin,
+    reset_user_points,
+    set_user_points_value,
+)
+from utils import fmt_points, parse_amount
+
+fines_router = Router()
+
+FINES_BUTTONS = ("Матч-штрафы", "матч-штрафы")  # второй — со старых клавиатур
+NO_FINES_TEXT = "Игроки с штрафом отсутствуют"
 
 
+# ---------- CallbackData ----------
+
+class FineMenuCb(CallbackData, prefix="fine_menu"):
+    action: str  # all | event | nick
+
+
+class FineAdminCb(CallbackData, prefix="fine_adm"):
+    action: str  # card | points_zero | points_set | points_dec | fine_add | fines_list
+    user_id: int
+
+
+class FineRemoveCb(CallbackData, prefix="fine_rm"):
+    fine_id: int
+    user_id: int
+
+
+class BackCb(CallbackData, prefix="back"):
+    target: str  # to_main
+
+
+# ---------- FSM ----------
+
+class FineStates(StatesGroup):
+    wait_event_number = State()
+    wait_nick_search = State()
+    wait_pick_user_number = State()
+    wait_points_set_value = State()
+    wait_points_dec_value = State()
+    wait_fine_text = State()
+    wait_fine_cost = State()
+
+
+# ---------- Render ----------
+
+def fine_line(fine) -> str:
+    cost = f" — {fmt_points(fine.cost)} кадров" if fine.cost else ""
+    return f"{fine.description}{cost}"
+
+
+def render_public_fines(user, fines) -> str:
+    return f"{user.name} — " + "; ".join(f.description for f in fines)
+
+
+def render_public_list(rows) -> str:
+    return "\n".join(f"{i}. {render_public_fines(u, fs)}" for i, (u, fs) in enumerate(rows, start=1))
+
+
+async def render_admin_user(user) -> str:
+    fines = await get_active_fines(user.id)
+    lines = [
+        f"Игрок: {user.name}",
+        f"Очки: {fmt_points(user.points)}",
+        f"Активных штрафов: {len(fines)}",
+    ]
+    if user.is_banned:
+        lines.append("🚫 Заблокирован")
+    if user.status is not None:
+        lines.append(f"Статус: {user.status}")
+    if user.tg_id is not None:
+        lines.append(f"tg_id: {user.tg_id}")
+    return "\n".join(lines)
+
+
+def render_fines_list(user, fines) -> str:
+    if not fines:
+        return f"У игрока {user.name} нет активных штрафов."
+    lines = [f"Активные штрафы {user.name}:"]
+    lines += [f"{i}. {fine_line(f)}" for i, f in enumerate(fines, start=1)]
+    return "\n".join(lines)
+
+
+# ---------- Keyboards ----------
+
+def kb_search_menu():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Все игроки", callback_data=FineMenuCb(action="all").pack())
+    kb.button(text="По ивенту", callback_data=FineMenuCb(action="event").pack())
+    kb.button(text="По нику", callback_data=FineMenuCb(action="nick").pack())
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def kb_admin_user_actions(user):
+    kb = InlineKeyboardBuilder()
+    for text, action in (
+        ("Обнулить очки", "points_zero"),
+        ("Задать очки", "points_set"),
+        ("Убавить очки", "points_dec"),
+        ("Добавить штраф", "fine_add"),
+        ("Штрафы игрока", "fines_list"),
+    ):
+        kb.button(text=text, callback_data=FineAdminCb(action=action, user_id=user.id).pack())
+    kb.button(text="Назад", callback_data=BackCb(target="to_main").pack())
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def kb_fines_list(user_id: int, fines):
+    kb = InlineKeyboardBuilder()
+    for i, fine in enumerate(fines, start=1):
+        kb.button(text=f"Снять №{i}", callback_data=FineRemoveCb(fine_id=fine.id, user_id=user_id).pack())
+    kb.button(text="◀️ К игроку", callback_data=FineAdminCb(action="card", user_id=user_id).pack())
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ---------- Helpers ----------
+
+async def send_admin_card(message: Message, user, prefix: str = ""):
+    await message.answer(prefix + await render_admin_user(user), reply_markup=kb_admin_user_actions(user))
+
+
+async def deny_non_admin(message: Message, state: FSMContext) -> bool:
+    """True — не админ, обработку надо прекратить."""
+    if await is_admin(message.from_user.id):
+        return False
+    await state.clear()
+    await message.answer("Доступно только администратору.")
+    return True
+
+
+# ---------- Entry ----------
+
+@fines_router.message(F.text.in_(FINES_BUTTONS))
+async def fine_entry(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("режим поиска", reply_markup=kb_search_menu())
+
+
+@fines_router.callback_query(BackCb.filter(F.target == "to_main"))
+async def back_to_main(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("режим поиска", reply_markup=kb_search_menu())
+    await callback.answer()
+
+
+# ---------- Menu: ALL ----------
+
+@fines_router.callback_query(FineMenuCb.filter(F.action == "all"))
+async def mode_all(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+
+    if await is_admin(callback.from_user.id):
+        users = await get_all_users_ordered()
+        if not users:
+            await callback.message.answer("Пользователей нет.")
+            await callback.answer()
+            return
+        await state.set_state(FineStates.wait_pick_user_number)
+        await state.update_data(pick_ids=[u.id for u in users])
+        lines = [f"{i}. {u.name} (очки: {fmt_points(u.points)})" for i, u in enumerate(users, start=1)]
+        await callback.message.answer("\n".join(lines) + "\n\nВведи номер игрока:")
+        await callback.answer()
+        return
+
+    rows = await get_users_with_active_fines()
+    await callback.message.answer(render_public_list(rows) if rows else NO_FINES_TEXT)
+    await callback.answer()
+
+
+# ---------- Menu: EVENT ----------
+
+@fines_router.callback_query(FineMenuCb.filter(F.action == "event"))
+async def mode_event_start(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    events = await get_all_events()
+    if not events:
+        await callback.message.answer("Ивентов нет.")
+        await callback.answer()
+        return
+
+    lines = []
+    for i, e in enumerate(events, start=1):
+        dt = e.time.strftime("%d.%m.%Y %H:%M") if getattr(e, "time", None) else ""
+        lines.append(f"{i}. {e.name} {dt}".strip())
+
+    await state.set_state(FineStates.wait_event_number)
+    await state.update_data(events_count=len(events))
+    await callback.message.answer("\n".join(lines) + "\n\nВведи номер ивента:")
+    await callback.answer()
+
+
+@fines_router.message(FineStates.wait_event_number)
+async def mode_event_apply(message: Message, state: FSMContext):
+    data = await state.get_data()
+    try:
+        idx = int((message.text or "").strip())
+    except ValueError:
+        await message.answer("Нужно число (номер ивента).")
+        return
+
+    if idx < 1 or idx > data.get("events_count", 0):
+        await message.answer("Неверный номер ивента.")
+        return
+
+    event = await get_event_by_index(idx)
+    if not event:
+        await message.answer("Ивент не найден.")
+        await state.clear()
+        return
+
+    if await is_admin(message.from_user.id):
+        users = await get_event_participants(event.id)
+        if not users:
+            await message.answer("Участников ивента нет.")
+            await state.clear()
+            return
+        await state.set_state(FineStates.wait_pick_user_number)
+        await state.update_data(pick_ids=[u.id for u in users])
+        lines = [f"{i}. {u.name} (очки: {fmt_points(u.points)})" for i, u in enumerate(users, start=1)]
+        await message.answer("\n".join(lines) + "\n\nВведи номер игрока:")
+        return
+
+    rows = await get_users_with_active_fines(event.id)
+    await message.answer(render_public_list(rows) if rows else NO_FINES_TEXT)
+    await state.clear()
+
+
+# ---------- Menu: NICK ----------
+
+@fines_router.callback_query(FineMenuCb.filter(F.action == "nick"))
+async def mode_nick_start(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(FineStates.wait_nick_search)
+    await callback.message.answer("Введи ник пользователя")
+    await callback.answer()
+
+
+@fines_router.message(FineStates.wait_nick_search)
+async def mode_nick_apply(message: Message, state: FSMContext):
+    await state.clear()
+    user = await get_user_by_name((message.text or "").strip())
+    if not user:
+        await message.answer("Нету игрока с таким ником")
+        return
+
+    if await is_admin(message.from_user.id):
+        await send_admin_card(message, user)
+        return
+
+    fines = await get_active_fines(user.id)
+    await message.answer(render_public_fines(user, fines) if fines else "Игрок не получал штрафов")
+
+
+# ---------- Admin: pick user by number ----------
+
+@fines_router.message(FineStates.wait_pick_user_number)
+async def pick_user_number(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+
+    ids = (await state.get_data()).get("pick_ids", [])
+    try:
+        idx = int((message.text or "").strip())
+    except ValueError:
+        await message.answer("Нужно число (номер игрока).")
+        return
+    if idx < 1 or idx > len(ids):
+        await message.answer("Неверный номер.")
+        return
+
+    await state.clear()
+    user = await get_user_by_id(ids[idx - 1])
+    if not user:
+        await message.answer("Игрок не найден.")
+        return
+    await send_admin_card(message, user)
+
+
+# ---------- Admin buttons (безопасно для чужих нажатий) ----------
+
+@fines_router.callback_query(FineAdminCb.filter())
+async def admin_buttons(callback: CallbackQuery, callback_data: FineAdminCb, state: FSMContext):
+    user = await get_user_by_id(callback_data.user_id)
+    if not user:
+        await callback.answer("Игрок не найден.", show_alert=True)
+        return
+
+    # Не админ нажал на кнопку из пересланного сообщения — только показываем штрафы
+    if not await is_admin(callback.from_user.id):
+        fines = await get_active_fines(user.id)
+        if fines:
+            await callback.message.answer(render_public_fines(user, fines))
+            await callback.answer()
+        else:
+            await callback.answer("У игрока нет штрафов.", show_alert=True)
+        return
+
+    action = callback_data.action
+
+    if action == "card":
+        await callback.message.edit_text(await render_admin_user(user), reply_markup=kb_admin_user_actions(user))
+        await callback.answer()
+        return
+
+    if action == "points_zero":
+        await reset_user_points(user.id)
+        user = await get_user_by_id(user.id)
+        await callback.message.edit_text(
+            "✅ Очки обнулены.\n\n" + await render_admin_user(user),
+            reply_markup=kb_admin_user_actions(user),
+        )
+        await callback.answer()
+        return
+
+    if action in ("points_set", "points_dec"):
+        await state.set_state(FineStates.wait_points_set_value if action == "points_set" else FineStates.wait_points_dec_value)
+        await state.update_data(target_user_id=user.id)
+        prompt = ("Введи число. Очки пользователя станут равны этому числу:" if action == "points_set"
+                  else "Введи число. На столько очков будет уменьшено:")
+        await callback.message.answer(prompt)
+        await callback.answer()
+        return
+
+    if action == "fine_add":
+        await state.set_state(FineStates.wait_fine_text)
+        await state.update_data(target_user_id=user.id)
+        await callback.message.answer(f"Введи описание штрафа для {user.name}:")
+        await callback.answer()
+        return
+
+    if action == "fines_list":
+        fines = await get_active_fines(user.id)
+        await callback.message.answer(render_fines_list(user, fines), reply_markup=kb_fines_list(user.id, fines))
+        await callback.answer()
+        return
+
+    await callback.answer("Неизвестное действие.", show_alert=True)
+
+
+# ---------- Admin: remove fine ----------
+
+@fines_router.callback_query(FineRemoveCb.filter())
+async def fine_remove(callback: CallbackQuery, callback_data: FineRemoveCb):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
+
+    if not await remove_fine(callback_data.fine_id, callback.from_user.id):
+        await callback.answer("Штраф уже закрыт.", show_alert=True)
+    else:
+        await callback.answer("✅ Штраф снят")
+
+    user = await get_user_by_id(callback_data.user_id)
+    if not user:
+        return
+    fines = await get_active_fines(user.id)
+    await callback.message.edit_text(render_fines_list(user, fines), reply_markup=kb_fines_list(user.id, fines))
+
+
+# ---------- Admin: points set/dec apply ----------
+
+@fines_router.message(FineStates.wait_points_set_value)
+async def points_set_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    try:
+        value = parse_amount(message.text)
+    except ValueError as e:
+        await message.answer(str(e))
+        return
+
+    user_id = (await state.get_data()).get("target_user_id")
+    await state.clear()
+    await set_user_points_value(user_id, value)
+    user = await get_user_by_id(user_id)
+    await send_admin_card(message, user, f"✅ Очки установлены на {fmt_points(value)}.\n\n")
+
+
+@fines_router.message(FineStates.wait_points_dec_value)
+async def points_dec_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    try:
+        delta = parse_amount(message.text)
+    except ValueError as e:
+        await message.answer(str(e))
+        return
+
+    user_id = (await state.get_data()).get("target_user_id")
+    await state.clear()
+    await decrease_user_points(user_id, delta)
+    user = await get_user_by_id(user_id)
+    await send_admin_card(message, user, f"✅ Очки уменьшены на {fmt_points(delta)}.\n\n")
+
+
+# ---------- Admin: add fine (описание → стоимость) ----------
+
+@fines_router.message(FineStates.wait_fine_text)
+async def fine_text_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Описание штрафа не может быть пустым.")
+        return
+    await state.update_data(fine_text=text)
+    await state.set_state(FineStates.wait_fine_cost)
+    await message.answer("Стоимость штрафа в кадрах (0 — без оплаты, снимает только админ):")
+
+
+@fines_router.message(FineStates.wait_fine_cost)
+async def fine_cost_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    try:
+        cost = parse_amount(message.text)
+    except ValueError as e:
+        await message.answer(str(e))
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    fine = await add_fine(data.get("target_user_id"), data.get("fine_text"), cost)
+    if not fine:
+        await message.answer("❌ Не удалось добавить штраф.")
+        return
+    user = await get_user_by_id(fine.user_id)
+    await send_admin_card(message, user, "✅ Штраф добавлен.\n\n")
+```
+
+- [ ] **Step 2: Удалить `handlers/admin.py`**
+
+```bash
+git rm handlers/admin.py
+```
+
+- [ ] **Step 3: Подключить роутер** — в `handlers/__init__.py`:
+  - `from .admin import admin` → `from .fines import fines_router`
+  - `admin_router.include_router(admin)` → `admin_router.include_router(fines_router)`
+
+- [ ] **Step 4: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import handlers" && venv_new/Scripts/python.exe -m pytest tests -q && grep -rn "handlers.admin\b\|from .admin import" handlers app.py`
+Expected: импорт OK, тесты PASS, grep ничего не находит.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add handlers/fines.py handlers/__init__.py
+git commit -m "feat: move match fines to fines table with cost and removal history
+
+Removes handlers/admin.py: its event-creation half was attached to a
+shadowed Router and never registered.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: Блокировка пользователей
+
+**Files:**
+- Create: `middlewares/__init__.py`, `middlewares/ban.py`
+- Modify: `handlers/fines.py`, `database/requests.py`, `app.py`
+- Test: `tests/test_requests_users.py` (дописать)
+
+**Interfaces:**
+- Consumes: `handlers.fines` из Task 7
+- Produces: `database.requests.set_banned(user_id: int, banned: bool) -> bool`, `database.requests.get_admin_tg_ids() -> list[int]`, `middlewares.BanMiddleware`, `middlewares.ban.BAN_TEXT`
+
+- [ ] **Step 1: Падающие тесты** — дописать в `tests/test_requests_users.py`:
+
+```python
+def test_set_banned(make_user):
+    uid = make_user(tg_id=300)
+    assert asyncio.run(r.set_banned(uid, True)) is True
+    assert asyncio.run(r.get_user(300)).is_banned is True
+    asyncio.run(r.set_banned(uid, False))
+    assert asyncio.run(r.get_user(300)).is_banned is False
+    assert asyncio.run(r.set_banned(9999, True)) is False
+
+
+def test_get_admin_tg_ids(make_user):
+    make_user(name="adm", tg_id=1, status="admin")
+    make_user(name="usr", tg_id=2)
+    assert asyncio.run(r.get_admin_tg_ids()) == [1]
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_requests_users.py -v` → FAIL (`no attribute 'set_banned'`).
+
+- [ ] **Step 2: Запросы** — в `database/requests.py` после `get_user_by_id`:
+
+```python
 async def set_banned(user_id: int, banned: bool) -> bool:
     async with async_session() as session:
-        result = await session.execute(update(User).where(User.id == user_id).values(is_banned=banned))
+        user = await session.get(User, user_id)
+        if not user:
+            return False
+        user.is_banned = banned
         await session.commit()
-        return result.rowcount == 1
+        return True
 
 
 async def get_admin_tg_ids() -> list:
     async with async_session() as session:
-        return list(await session.scalars(select(User.tg_id).where(User.status == "admin")))
+        result = await session.scalars(select(User.tg_id).where(User.status == "admin"))
+        return list(result.all())
 ```
-Примечание: `session.get(Fine, ...)` после выхода из `async with` возвращает объект с уже загруженными колонками (commit не было) — это безопасно.
-- [ ] **Step 4:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 5: Commit** `git add database/fines.py tests/test_fines_db.py && git commit -m "feat: fines data layer with history, payments and bans"`
 
----
+Run: `venv_new/Scripts/python.exe -m pytest tests -v` → PASS.
 
-### Task 7: `database/training.py`
+- [ ] **Step 3: Middleware** — `middlewares/ban.py`:
 
-**Files:** Create `database/training.py`, `tests/test_training_db.py`.
-
-**Interfaces — Produces** (async, кроме `question_to_dict`; `async_session` импортирован на уровне модуля):
-- `MAX_QUESTIONS = 25`
-- Вопрос как dict: `{"text": str, "options": [str, str, str, str], "correct": int (1..4)}`
-- `question_to_dict(q: TrainingQuestion) -> dict`
-- `create_test(title: str, cost: float, questions: list[dict]) -> int`
-- `get_tests_with_counts() -> list[tuple[TrainingTest, int]]` — по `id`
-- `get_test(test_id: int) -> TrainingTest | None`
-- `get_questions(test_id: int) -> list[TrainingQuestion]` — по `position, id`
-- `update_test(test_id: int, **fields) -> bool` (поля `title`, `cost`)
-- `update_question(question_id: int, q: dict) -> bool`
-- `add_question(test_id: int, q: dict) -> bool` — False, если теста нет или уже `MAX_QUESTIONS`
-- `delete_question(question_id: int) -> bool` — False, если это последний вопрос теста
-- `delete_test(test_id: int) -> bool` — удаляет попытки, вопросы, тест (явно, без опоры на FK cascade в SQLite)
-- `has_passed(user_id: int, test_id: int) -> bool`
-- `last_failed_at(user_id: int, test_id: int) -> datetime | None`
-- `get_test_statuses(user_id: int) -> list[tuple[int, str, bool]]` — (test_id, title, пройден) для всех тестов, по `id`
-- `charge_points(user_id: int, cost: float) -> bool` — атомарно `points -= cost`, если хватает; `cost == 0` → True без изменений
-- `record_attempt(user_id: int, test_id: int, correct: int, total: int, passed: bool) -> bool` — False, если теста уже нет
-
-- [ ] **Step 1: Тесты** — `tests/test_training_db.py`:
 ```python
-from datetime import datetime, timedelta
-
-from database import training
-from database.models import User, TrainingAttempt
-from tests.conftest import run
-
-
-def q(n, correct=1):
-    return {"text": f"Q{n}", "options": ["a", "b", "c", "d"], "correct": correct}
-
-
-async def _user(db, points=10):
-    async with db() as s:
-        s.add(User(id=1, name="Bob", tg_id=11, status="base_user", points=points))
-        await s.commit()
-
-
-def test_create_and_read(db):
-    test_id = run(training.create_test("Тест А", 5, [q(1), q(2, 3)]))
-    [(test, count)] = run(training.get_tests_with_counts())
-    assert (test.id, test.title, test.cost, count) == (test_id, "Тест А", 5, 2)
-    questions = run(training.get_questions(test_id))
-    assert [x.position for x in questions] == [1, 2]
-    assert training.question_to_dict(questions[1]) == q(2, 3)
-
-
-def test_edit_questions(db):
-    test_id = run(training.create_test("T", 0, [q(1)]))
-    [only] = run(training.get_questions(test_id))
-    assert run(training.delete_question(only.id)) is False      # последний вопрос не удаляется
-    assert run(training.update_question(only.id, q(9, 4))) is True
-    assert run(training.add_question(test_id, q(2))) is True
-    assert [x.text for x in run(training.get_questions(test_id))] == ["Q9", "Q2"]
-    assert run(training.update_test(test_id, title="New", cost=2)) is True
-    assert run(training.get_test(test_id)).title == "New"
-
-
-def test_max_questions(db):
-    test_id = run(training.create_test("T", 0, [q(i) for i in range(training.MAX_QUESTIONS)]))
-    assert run(training.add_question(test_id, q(99))) is False
-
-
-def test_attempts_and_statuses(db):
-    run(_user(db))
-    a = run(training.create_test("A", 0, [q(1)]))
-    b = run(training.create_test("B", 0, [q(1)]))
-    assert run(training.last_failed_at(1, a)) is None
-    assert run(training.record_attempt(1, a, 0, 1, False)) is True
-    assert run(training.last_failed_at(1, a)) is not None
-    assert run(training.has_passed(1, a)) is False
-    assert run(training.record_attempt(1, a, 1, 1, True)) is True
-    assert run(training.has_passed(1, a)) is True
-    assert run(training.get_test_statuses(1)) == [(a, "A", True), (b, "B", False)]
-    assert run(training.record_attempt(1, 999, 1, 1, True)) is False
-
-
-def test_delete_test_cascades(db):
-    run(_user(db))
-    a = run(training.create_test("A", 0, [q(1), q(2)]))
-    run(training.record_attempt(1, a, 1, 2, False))
-    assert run(training.delete_test(a)) is True
-    assert run(training.get_test(a)) is None
-    assert run(training.get_questions(a)) == []
-    assert run(training.get_test_statuses(1)) == []
-
-
-def test_charge_points(db):
-    run(_user(db, points=5))
-    assert run(training.charge_points(1, 0)) is True
-    assert run(training.charge_points(1, 6)) is False
-    assert run(training.charge_points(1, 5)) is True
-    assert run(training.charge_points(1, 0.01)) is False
-```
-- [ ] **Step 2:** `$PY -m pytest tests/test_training_db.py -q` — FAIL.
-- [ ] **Step 3: Реализация** `database/training.py`:
-```python
-from sqlalchemy import delete, func, select, update
-
-from database.models import async_session, TrainingAttempt, TrainingQuestion, TrainingTest, User
-
-MAX_QUESTIONS = 25
-
-
-def _question_columns(q: dict) -> dict:
-    o = q["options"]
-    return dict(text=q["text"], option_1=o[0], option_2=o[1], option_3=o[2], option_4=o[3],
-                correct=int(q["correct"]))
-
-
-def question_to_dict(q) -> dict:
-    return {"text": q.text, "options": [q.option_1, q.option_2, q.option_3, q.option_4],
-            "correct": q.correct}
-
-
-async def create_test(title: str, cost: float, questions: list) -> int:
-    async with async_session() as session:
-        test = TrainingTest(title=title, cost=round(float(cost), 2))
-        session.add(test)
-        await session.flush()
-        test_id = test.id
-        for position, q in enumerate(questions, 1):
-            session.add(TrainingQuestion(test_id=test_id, position=position, **_question_columns(q)))
-        await session.commit()
-        return test_id
-
-
-async def get_tests_with_counts() -> list:
-    stmt = (
-        select(TrainingTest, func.count(TrainingQuestion.id))
-        .outerjoin(TrainingQuestion, TrainingQuestion.test_id == TrainingTest.id)
-        .group_by(TrainingTest.id)
-        .order_by(TrainingTest.id)
-    )
-    async with async_session() as session:
-        return [(test, count) for test, count in (await session.execute(stmt)).all()]
-
-
-async def get_test(test_id: int):
-    async with async_session() as session:
-        return await session.get(TrainingTest, test_id)
-
-
-async def get_questions(test_id: int) -> list:
-    async with async_session() as session:
-        result = await session.scalars(
-            select(TrainingQuestion).where(TrainingQuestion.test_id == test_id)
-            .order_by(TrainingQuestion.position, TrainingQuestion.id)
-        )
-        return list(result)
-
-
-async def update_test(test_id: int, **fields) -> bool:
-    async with async_session() as session:
-        result = await session.execute(update(TrainingTest).where(TrainingTest.id == test_id).values(**fields))
-        await session.commit()
-        return result.rowcount == 1
-
-
-async def update_question(question_id: int, q: dict) -> bool:
-    async with async_session() as session:
-        result = await session.execute(
-            update(TrainingQuestion).where(TrainingQuestion.id == question_id).values(**_question_columns(q))
-        )
-        await session.commit()
-        return result.rowcount == 1
-
-
-async def add_question(test_id: int, q: dict) -> bool:
-    async with async_session() as session:
-        if not await session.get(TrainingTest, test_id):
-            return False
-        count, last = (await session.execute(
-            select(func.count(TrainingQuestion.id), func.max(TrainingQuestion.position))
-            .where(TrainingQuestion.test_id == test_id)
-        )).one()
-        if count >= MAX_QUESTIONS:
-            return False
-        session.add(TrainingQuestion(test_id=test_id, position=(last or 0) + 1, **_question_columns(q)))
-        await session.commit()
-        return True
-
-
-async def delete_question(question_id: int) -> bool:
-    async with async_session() as session:
-        question = await session.get(TrainingQuestion, question_id)
-        if not question:
-            return False
-        count = await session.scalar(
-            select(func.count(TrainingQuestion.id)).where(TrainingQuestion.test_id == question.test_id)
-        )
-        if count <= 1:
-            return False
-        await session.delete(question)
-        await session.commit()
-        return True
-
-
-async def delete_test(test_id: int) -> bool:
-    async with async_session() as session:
-        await session.execute(delete(TrainingAttempt).where(TrainingAttempt.test_id == test_id))
-        await session.execute(delete(TrainingQuestion).where(TrainingQuestion.test_id == test_id))
-        result = await session.execute(delete(TrainingTest).where(TrainingTest.id == test_id))
-        await session.commit()
-        return result.rowcount == 1
-
-
-async def has_passed(user_id: int, test_id: int) -> bool:
-    async with async_session() as session:
-        found = await session.scalar(
-            select(TrainingAttempt.id).where(TrainingAttempt.user_id == user_id,
-                                             TrainingAttempt.test_id == test_id,
-                                             TrainingAttempt.passed.is_(True)).limit(1)
-        )
-        return found is not None
-
-
-async def last_failed_at(user_id: int, test_id: int):
-    async with async_session() as session:
-        return await session.scalar(
-            select(func.max(TrainingAttempt.created_at)).where(TrainingAttempt.user_id == user_id,
-                                                               TrainingAttempt.test_id == test_id,
-                                                               TrainingAttempt.passed.is_(False))
-        )
-
-
-async def get_test_statuses(user_id: int) -> list:
-    async with async_session() as session:
-        passed = set(await session.scalars(
-            select(TrainingAttempt.test_id).where(TrainingAttempt.user_id == user_id,
-                                                  TrainingAttempt.passed.is_(True))
-        ))
-        tests = (await session.execute(select(TrainingTest.id, TrainingTest.title).order_by(TrainingTest.id))).all()
-    return [(test_id, title, test_id in passed) for test_id, title in tests]
-
-
-async def charge_points(user_id: int, cost: float) -> bool:
-    if not cost:
-        return True
-    async with async_session() as session:
-        result = await session.execute(
-            update(User).where(User.id == user_id, User.points >= cost)
-            .values(points=func.round(User.points - cost, 2))
-        )
-        await session.commit()
-        return result.rowcount == 1
-
-
-async def record_attempt(user_id: int, test_id: int, correct: int, total: int, passed: bool) -> bool:
-    async with async_session() as session:
-        if not await session.get(TrainingTest, test_id):
-            return False
-        session.add(TrainingAttempt(user_id=user_id, test_id=test_id, correct_count=correct,
-                                    total=total, passed=passed))
-        await session.commit()
-        return True
-```
-- [ ] **Step 4:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 5: Commit** `git add database/training.py tests/test_training_db.py && git commit -m "feat: training tests data layer"`
-
----
-
-### Task 8: Статус выдачи наград (данные)
-
-**Files:** Modify `database/requests.py` — новые функции **сразу после** `get_user_rewards` (не в конец файла: там правит Task 4). Create `tests/test_rewards_db.py`.
-
-**Interfaces — Produces:**
-- `get_user_rewards_with_status(user_id: int) -> list[tuple[UserReward, Reward]]` — новые сверху (`UserReward.created_at desc, UserReward.id desc`)
-- `toggle_reward_issued(user_reward_id: int) -> tuple[bool, int, str] | None` — (новое значение `issued`, `tg_id` владельца, название награды)
-
-- [ ] **Step 1: Тесты** — `tests/test_rewards_db.py`:
-```python
-from database import requests
-from database.models import Reward, User, UserReward
-from tests.conftest import run
-
-
-async def _seed(db):
-    async with db() as s:
-        s.add_all([
-            User(id=1, name="Bob", tg_id=11, status="base_user", points=0),
-            Reward(id=1, name="Камуфляж №1", gift_link="x", price=5),
-            Reward(id=2, name="Камуфляж №2", gift_link="y", price=5),
-            UserReward(id=1, user_id=1, reward_id=1),
-            UserReward(id=2, user_id=1, reward_id=2),
-        ])
-        await s.commit()
-
-
-def test_rewards_with_status_and_toggle(db):
-    run(_seed(db))
-    rows = run(requests.get_user_rewards_with_status(1))
-    assert [(r.name, ur.issued) for ur, r in rows] == [("Камуфляж №2", False), ("Камуфляж №1", False)]
-    assert run(requests.toggle_reward_issued(1)) == (True, 11, "Камуфляж №1")
-    assert run(requests.toggle_reward_issued(1)) == (False, 11, "Камуфляж №1")
-    assert run(requests.toggle_reward_issued(999)) is None
-
-
-def test_new_purchase_is_not_issued(db):
-    run(_seed(db))
-
-    async def buy():
-        async with db() as s:
-            s.add(Reward(id=3, name="R3", gift_link="z", price=1))
-            await s.commit()
-        return await requests.assign_reward_to_user(1, 3)
-
-    assert run(buy()) is True
-    rows = run(requests.get_user_rewards_with_status(1))
-    assert dict((r.name, ur.issued) for ur, r in rows)["R3"] is False
-```
-- [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Реализация** (после `get_user_rewards`; `User`, `Reward`, `UserReward` уже импортированы):
-```python
-async def get_user_rewards_with_status(user_id: int):
-    async with async_session() as session:
-        result = await session.execute(
-            select(UserReward, Reward)
-            .join(Reward, Reward.id == UserReward.reward_id)
-            .where(UserReward.user_id == user_id)
-            .order_by(UserReward.created_at.desc(), UserReward.id.desc())
-        )
-        return [(user_reward, reward) for user_reward, reward in result.all()]
-
-
-async def toggle_reward_issued(user_reward_id: int):
-    """Переключает «выдан/не выдан». Возвращает (issued, tg_id владельца, название) или None."""
-    async with async_session() as session:
-        user_reward = await session.get(UserReward, user_reward_id)
-        if not user_reward:
-            return None
-        user_reward.issued = not user_reward.issued
-        issued = user_reward.issued
-        reward = await session.get(Reward, user_reward.reward_id)
-        owner = await session.get(User, user_reward.user_id)
-        result = (issued, owner.tg_id, reward.name)
-        await session.commit()
-        return result
-```
-- [ ] **Step 4:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 5: Commit** `git add database/requests.py tests/test_rewards_db.py && git commit -m "feat: reward issued status queries"`
-
----
-
-## Волна 3 (после слияния волны 2)
-
-### Task 9: `handlers/fines.py` — матч-штрафы, блокировка, статус наград
-
-**Files:** Create `handlers/fines.py`. Delete `handlers/admin.py` (`git rm`). **Не** трогать `handlers/__init__.py` (Task 15 заменит `from .admin import admin` на `from .fines import fines_router`).
-
-Важно: в `handlers/admin.py` строки 1–202 — мёртвый код (обработчики привязаны к первому `Router()`, который перезаписан на строке 232 и нигде не подключён; живые версии этих сценариев — в `handlers/events.py`). Экспортируемый роутер `admin` содержит только код штрафов (строки 204–648). Мёртвый код не переносить.
-
-**Interfaces:**
-- Consumes: `database.fines.{add_fine, get_active_fines, get_users_with_active_fines, remove_fine, set_banned}`; `database.requests.{is_admin, get_user_by_name, get_user_by_id, get_all_users_ordered, get_all_events, get_event_by_index, get_event_participants, set_user_points_value, decrease_user_points, reset_user_points, get_user_rewards_with_status, toggle_reward_issued}`; `utils.{fmt_points, parse_amount}`.
-- Produces: `handlers.fines.fines_router: Router`; `FINES_BUTTONS = {"Матч-штрафы", "матч-штрафы"}`.
-
-Поведение (переносится из `handlers/admin.py` 204–648, дальше — изменения):
-
-1. **Вход:** `@fines_router.message(F.text.in_(FINES_BUTTONS))` — как `fine_entry`. Меню «Все игроки / По ивенту / По нику» — без изменений, `CallbackData`-классы `FineMenuCb`, `FineAdminCb`, `BackCb` сохраняют префиксы.
-2. **Публичный режим** (не админ) — вместо `User.fine` используется `get_users_with_active_fines(event_id)`:
-   - «Все игроки» / «По ивенту»: `"{i}. {user.name} — {'; '.join(f.description for f in fines)}"`; пусто → «Игроки с штрафом отсутствуют».
-   - «По нику»: `get_active_fines(user.id)`; пусто → «Нет действующих штрафов»; иначе та же строка.
-   - Клик не-админа по админской кнопке: показать ту же строку (или alert «У игрока нет штрафов.»).
-3. **Карточка админа** `async def render_admin_user(user) -> str`:
-```
-Игрок: <name>
-Очки: <fmt_points>
-Активных штрафов: <n>
-🚫 Заблокирован            ← только если user.is_banned
-Статус: <status>
-tg_id: <tg_id>
-```
-4. **Клавиатура** `kb_admin_user_actions(user)` (принимает объект пользователя), `adjust(1)`, порядок:
-   «Обнулить очки», «Задать очки», «Убавить очки», «Добавить штраф» (`fine_add`), «Штрафы игрока» (`fines_list`), «Награды игрока» (`rewards_list`), «Заблокировать 🚫» (`ban`) или «Разблокировать» (`unban`) — по `user.is_banned`; «Назад» (`BackCb`). Новое действие `card` у `FineAdminCb` — перерисовать карточку (`edit_text`).
-5. **Добавить штраф:** `wait_fine_text` → «Введи стоимость штрафа в кадрах (0 — без оплаты):» → `wait_fine_cost` → `parse_amount` (ошибка → текст `ValueError`, остаёмся в состоянии) → `add_fine` → «✅ Штраф добавлен.\n\n» + карточка + клавиатура.
-6. **Штрафы игрока:** `CallbackData FineRemoveCb(prefix="fine_rm", fine_id: int, user_id: int)`. Текст: «Активные штрафы {name}:\n1. {описание} — {cost} кадров» (для `cost == 0` без « — …»), пусто → «У {name} нет активных штрафов.». Кнопки «Снять №i» + «◀️ К игроку» (`FineAdminCb(action="card")`). Нажатие «Снять»: `remove_fine(fine_id, callback.from_user.id)`; False → alert «Штраф уже закрыт.»; True → `callback.answer("Штраф снят")` и перерисовка списка (`edit_text`).
-7. **Награды игрока:** `CallbackData RewardToggleCb(prefix="rw_tg", user_reward_id: int, user_id: int)`. Текст: «Награды {name}:\n1. {reward.name} — выдан ✅ / не выдан ❌», пусто → «У {name} нет наград.». Кнопки «{'✅' if issued else '❌'} {i}. {name[:30]}» + «◀️ К игроку». Нажатие: `toggle_reward_issued`; None → alert «Награда не найдена.»; если новое значение True — `callback.bot.send_message(tg_id, f"🎁 Награда «{name}» выдана ✅")` в `try/except TelegramAPIError` (ошибка → `callback.answer("Статус изменён, но уведомление не доставлено", show_alert=True)`); перерисовать список.
-8. **Блокировка:** `CallbackData BanMsgCb(prefix="ban_msg", user_id: int, ban: bool, with_msg: bool)`.
-   - `ban`/`unban`: если цель — админ (`user.status == "admin"`) → alert «Нельзя заблокировать администратора.». Иначе сообщение «Хотите ли вы оставить сообщение пользователю?» с кнопками «Да» (`with_msg=True`) / «Нет» (`with_msg=False`).
-   - «Да»: состояние `FineStates.wait_ban_message`, данные `target_user_id`, `ban`; «Введите сообщение».
-   - «Нет» / после ввода текста: общий хелпер
-```python
-async def apply_ban(message: Message, bot, user_id: int, ban: bool, note: str | None):
-    user = await get_user_by_id(user_id)
-    if not user:
-        await message.answer("Игрок не найден.")
-        return
-    await set_banned(user_id, ban)
-    report = f"✅ {user.name} {'заблокирован' if ban else 'разблокирован'}."
-    if note is None:
-        report += " Без уведомления."
-    else:
-        header = "🚫 Вы заблокированы." if ban else "✅ Вы разблокированы."
-        try:
-            await bot.send_message(user.tg_id, f"{header}\n\n{note}")
-        except TelegramAPIError:
-            report += "\n⚠️ Уведомление не доставлено (пользователь остановил бота)."
-    user = await get_user_by_id(user_id)
-    await message.answer(report + "\n\n" + await render_admin_user(user),
-                         reply_markup=kb_admin_user_actions(user))
-```
-   (`TelegramAPIError` из `aiogram.exceptions`.)
-9. Все message-обработчики состояний админа и все админские callback'и проверяют `is_admin` (как в исходнике).
-10. Все ответы с никами/описаниями — без `parse_mode`.
-
-- [ ] **Step 1:** Создать `handlers/fines.py` по описанию выше (перенеся код из `handlers/admin.py` 204–648, импорт `fmt_points`/`parse_amount` из `utils`).
-- [ ] **Step 2:** `git rm handlers/admin.py`.
-- [ ] **Step 3:** Проверка импорта без `handlers/__init__` (он ещё ссылается на `.admin`): `$PY -c "import importlib.util,sys; spec=importlib.util.spec_from_file_location('fines_mod','handlers/fines.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.fines_router)"` — печатает роутер.
-- [ ] **Step 4:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 5: Commit** `git add handlers/fines.py && git commit -m "feat: fines handlers with removal history, bans and reward status"` (удаление `handlers/admin.py` уже в индексе после `git rm`).
-
----
-
-### Task 10: Middleware блокировки
-
-**Files:** Create `middlewares/__init__.py`, `middlewares/ban.py`, `tests/test_ban_middleware.py`. Modify `app.py`.
-
-**Interfaces:**
-- Consumes: `database.requests.get_user(tg_id)` (поля `is_banned`, `status`).
-- Produces: `middlewares.BanMiddleware`, `middlewares.ban.BAN_TEXT = "🚫 Вы заблокированы"`.
-
-- [ ] **Step 1: Тесты** — `tests/test_ban_middleware.py`:
-```python
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
-import middlewares.ban as ban
-from middlewares.ban import BAN_TEXT, BanMiddleware
-from tests.conftest import run
-
-
-def fake_message(successful_payment=None):
-    msg = SimpleNamespace(successful_payment=successful_payment, answer=AsyncMock())
-    return msg
-
-
-def call(monkeypatch, db_user, event, from_user=SimpleNamespace(id=5)):
-    monkeypatch.setattr(ban, "get_user", AsyncMock(return_value=db_user))
-    handler = AsyncMock(return_value="handled")
-    result = run(BanMiddleware()(handler, event, {"event_from_user": from_user}))
-    return result, handler
-
-
-def test_passes_regular_user(monkeypatch):
-    result, handler = call(monkeypatch, SimpleNamespace(is_banned=False, status="base_user"), fake_message())
-    assert result == "handled" and handler.await_count == 1
-
-
-def test_blocks_banned_message(monkeypatch):
-    event = fake_message()
-    result, handler = call(monkeypatch, SimpleNamespace(is_banned=True, status="base_user"), event)
-    assert result is None and handler.await_count == 0
-    event.answer.assert_awaited_once_with(BAN_TEXT)
-
-
-def test_admin_never_blocked(monkeypatch):
-    result, handler = call(monkeypatch, SimpleNamespace(is_banned=True, status="admin"), fake_message())
-    assert result == "handled"
-
-
-def test_successful_payment_passes(monkeypatch):
-    result, handler = call(monkeypatch, SimpleNamespace(is_banned=True, status="base_user"),
-                           fake_message(successful_payment=object()))
-    assert result == "handled"
-
-
-def test_unknown_user_passes(monkeypatch):
-    result, handler = call(monkeypatch, None, fake_message())
-    assert result == "handled"
-```
-Для `CallbackQuery` проверка через `isinstance` — в middleware используйте `isinstance(event, CallbackQuery)` → `await event.answer(BAN_TEXT, show_alert=True)`; для остальных — `await event.answer(BAN_TEXT)`.
-- [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Реализация** — `middlewares/ban.py`:
-```python
+"""Заблокированный пользователь получает короткий ответ, обработчики не вызываются."""
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, TelegramObject
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from database.requests import get_user
 
@@ -1444,241 +1816,639 @@ BAN_TEXT = "🚫 Вы заблокированы"
 
 
 class BanMiddleware(BaseMiddleware):
-    """Не пускает заблокированных пользователей к обработчикам. Админов не трогает.
-
-    Сообщения об успешной оплате пропускаются всегда, иначе платёж,
-    начатый до блокировки, не будет зачтён.
-    """
-
     async def __call__(
         self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        handler: Callable[[TelegramObject, dict], Awaitable[Any]],
         event: TelegramObject,
-        data: dict[str, Any],
+        data: dict,
     ) -> Any:
         from_user = data.get("event_from_user")
-        if from_user is None or getattr(event, "successful_payment", None):
+        # Платёж, начатый до блокировки, должен завершиться
+        if from_user is None or (isinstance(event, Message) and event.successful_payment):
             return await handler(event, data)
 
         user = await get_user(from_user.id)
-        if not user or not user.is_banned or user.status == "admin":
-            return await handler(event, data)
-
-        if isinstance(event, CallbackQuery):
-            await event.answer(BAN_TEXT, show_alert=True)
-        else:
-            await event.answer(BAN_TEXT)
-        return None
+        if user and user.is_banned and user.status != "admin":
+            if isinstance(event, CallbackQuery):
+                await event.answer(BAN_TEXT, show_alert=True)
+            elif isinstance(event, Message):
+                await event.answer(BAN_TEXT)
+            return None
+        return await handler(event, data)
 ```
+
 `middlewares/__init__.py`:
 ```python
 from .ban import BanMiddleware
 
 __all__ = ["BanMiddleware"]
 ```
-- [ ] **Step 4:** `app.py` — импорт `from middlewares import BanMiddleware`; в `main()` перед `for router in handlers:`:
+
+- [ ] **Step 4: Регистрация** — в `app.py`:
+  - импорт: `from middlewares import BanMiddleware`
+  - в `main()` сразу после `dp = Dispatcher()`:
+
 ```python
     dp.message.outer_middleware(BanMiddleware())
     dp.callback_query.outer_middleware(BanMiddleware())
 ```
-- [ ] **Step 5:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 6: Commit** `git add middlewares/__init__.py middlewares/ban.py tests/test_ban_middleware.py app.py && git commit -m "feat: block banned users via middleware"`
+
+- [ ] **Step 5: Кнопки и сценарий в `handlers/fines.py`**
+
+Импорты — добавить:
+```python
+from aiogram.exceptions import TelegramAPIError
+```
+и `set_banned` в импорт из `database.requests`.
+
+Комментарий в `FineAdminCb.action` дополнить `| ban | unban`. После `FineRemoveCb` добавить:
+```python
+class BanMsgCb(CallbackData, prefix="ban_msg"):
+    user_id: int
+    ban: bool
+    with_msg: bool
+```
+
+В `FineStates` добавить `wait_ban_message = State()`.
+
+В `kb_admin_user_actions` перед кнопкой «Назад»:
+```python
+    if user.is_banned:
+        kb.button(text="Разблокировать", callback_data=FineAdminCb(action="unban", user_id=user.id).pack())
+    else:
+        kb.button(text="Заблокировать 🚫", callback_data=FineAdminCb(action="ban", user_id=user.id).pack())
+```
+
+В `admin_buttons` перед финальным `await callback.answer("Неизвестное действие."...)`:
+```python
+    if action in ("ban", "unban"):
+        ban = action == "ban"
+        if ban and user.status == "admin":
+            await callback.answer("Нельзя заблокировать администратора.", show_alert=True)
+            return
+        kb = InlineKeyboardBuilder()
+        kb.button(text="Да", callback_data=BanMsgCb(user_id=user.id, ban=ban, with_msg=True).pack())
+        kb.button(text="Нет", callback_data=BanMsgCb(user_id=user.id, ban=ban, with_msg=False).pack())
+        kb.adjust(2)
+        await callback.message.answer("Хотите ли вы оставить сообщение пользователю?", reply_markup=kb.as_markup())
+        await callback.answer()
+        return
+```
+
+В конец файла:
+```python
+# ---------- Admin: ban / unban ----------
+
+async def apply_ban(admin_message: Message, user_id: int, ban: bool, text: str = None):
+    user = await get_user_by_id(user_id)
+    if not user:
+        await admin_message.answer("Игрок не найден.")
+        return
+
+    await set_banned(user.id, ban)
+    report = f"✅ {user.name} {'заблокирован' if ban else 'разблокирован'}."
+    if text is None:
+        report += " Без уведомления."
+    else:
+        header = "🚫 Вы заблокированы." if ban else "✅ Вы разблокированы."
+        try:
+            await admin_message.bot.send_message(user.tg_id, f"{header}\n\n{text}")
+        except TelegramAPIError:
+            report += "\n⚠️ Уведомление не доставлено (пользователь остановил бота)."
+
+    user = await get_user_by_id(user.id)
+    await send_admin_card(admin_message, user, report + "\n\n")
+
+
+@fines_router.callback_query(BanMsgCb.filter())
+async def ban_message_choice(callback: CallbackQuery, callback_data: BanMsgCb, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    if callback_data.with_msg:
+        await state.set_state(FineStates.wait_ban_message)
+        await state.update_data(target_user_id=callback_data.user_id, ban=callback_data.ban)
+        await callback.message.answer("Введите сообщение")
+        return
+    await apply_ban(callback.message, callback_data.user_id, callback_data.ban)
+
+
+@fines_router.message(FineStates.wait_ban_message)
+async def ban_message_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Сообщение не может быть пустым. Введите текст:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await apply_ban(message, data["target_user_id"], data["ban"], text)
+```
+
+- [ ] **Step 6: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: импорт OK (бот не стартует — `main()` под `__main__`), тесты PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add middlewares/__init__.py middlewares/ban.py handlers/fines.py database/requests.py app.py tests/test_requests_users.py
+git commit -m "feat: block and unblock users from match fines with optional message
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
-### Task 11: `handlers/fine_payment.py` — оплата штрафов
+### Task 9: Оплата штрафов (кадры и Telegram Stars)
 
-**Files:** Create `handlers/fine_payment.py`, `tests/test_fine_payment.py`.
+**Files:**
+- Create: `handlers/fine_payment.py`
+- Modify: `handlers/__init__.py`
 
 **Interfaces:**
-- Consumes: `database.fines.{get_fine, get_active_fines, pay_fine_with_cadrs, mark_fine_paid_stars, get_admin_tg_ids}`; `database.requests.get_user`; `utils.{fine_stars, fmt_points}`.
-- Produces: `fine_payment_router: Router`; `class FinePayCb(CallbackData, prefix="fpay")` с полями `action: str` (`list | choose | cadrs | stars`), `fine_id: int`; `fine_payload(fine_id: int) -> str` (`"fine:<id>"`); `parse_fine_payload(payload: str) -> int | None`.
+- Consumes: `database.fines.get_active_fines/get_fine/pay_fine_with_cadrs/mark_fine_paid_stars`, `database.requests.get_user/get_admin_tg_ids`, `utils.fine_stars/fine_payload/parse_fine_payload/fmt_points`
+- Produces: `fine_payment_router`, `FinePayCb(action: str, fine_id: int = 0)` — `action="list"` открывает список штрафов к оплате (используется кабинетом в Task 11)
 
-- [ ] **Step 1: Тесты** — `tests/test_fine_payment.py`:
+- [ ] **Step 1: Создать `handlers/fine_payment.py`**
+
 ```python
-from handlers.fine_payment import FinePayCb, fine_payload, parse_fine_payload
+"""Оплата матч-штрафов: кадрами или Telegram Stars (1 кадр = 5 ⭐)."""
+from aiogram import Router, F
+from aiogram.exceptions import TelegramAPIError
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from database.fines import get_active_fines, get_fine, mark_fine_paid_stars, pay_fine_with_cadrs
+from database.requests import get_admin_tg_ids, get_user
+from utils import fine_payload, fine_stars, fmt_points, parse_fine_payload
+
+fine_payment_router = Router()
+
+STARS_CURRENCY = "XTR"
+CLOSED_TEXT = "Штраф уже закрыт."
+
+CADRS_RESULT_TEXT = {
+    "no_points": "Недостаточно кадров.",
+    "not_active": CLOSED_TEXT,
+    "free": "Этот штраф снимает только администратор.",
+    "not_found": "Штраф не найден.",
+}
 
 
-def test_payload_roundtrip():
-    assert parse_fine_payload(fine_payload(42)) == 42
+class FinePayCb(CallbackData, prefix="fpay"):
+    action: str  # list | choose | cadrs | stars
+    fine_id: int = 0
 
 
-def test_bad_payloads():
-    for bad in ["", "fine:", "fine:x", "reward:1", None]:
-        assert parse_fine_payload(bad) is None
+async def load_payable(callback: CallbackQuery, fine_id: int):
+    """(user, fine) для активного платного штрафа этого пользователя, иначе alert и None."""
+    user = await get_user(callback.from_user.id)
+    fine = await get_fine(fine_id)
+    if not user or not fine or fine.user_id != user.id or fine.status != "active" or not fine.cost:
+        await callback.answer(CLOSED_TEXT, show_alert=True)
+        return None
+    return user, fine
 
 
-def test_callback_pack_short():
-    assert len(FinePayCb(action="stars", fine_id=10**9).pack()) <= 64
-```
-Примечание: импорт `handlers.fine_payment` выполняет `handlers/__init__.py`. До Task 15 он импортирует `.admin`, который удалён Task 9 в параллельной ветке — в вашем worktree `handlers/admin.py` ещё существует, так что импорт работает.
-- [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Реализация.** Поведение:
-  - `FinePayCb(action="list", fine_id=0)`: пользователь `get_user(callback.from_user.id)`; активные штрафы с `cost > 0`; пусто → alert «Нет штрафов для оплаты»; иначе новое сообщение «Выберите штраф для оплаты:» + кнопки `f"{i}. {description[:40]} — {fmt_points(cost)} кадров"` → `choose`.
-  - `choose`: `get_fine`; нет / не `active` / чужой → alert «Штраф уже закрыт.»; иначе `edit_text` «Штраф: {description}\nСтоимость: {fmt_points(cost)} кадров или {fine_stars(cost)} ⭐» + кнопки «🎞 Кадрами — {fmt_points(cost)}» (`cadrs`), «⭐ Звёздами — {fine_stars(cost)}» (`stars`).
-  - `cadrs`: `pay_fine_with_cadrs(fine_id, user.id)`; `"ok"` → `edit_text("✅ Штраф оплачен кадрами.")`; `"no_points"` → alert «Недостаточно кадров»; `"not_active"`/`"not_found"` → alert «Штраф уже закрыт.»; `"free"` → alert «Этот штраф нельзя оплатить — его снимает администратор.».
-  - `stars`: проверки как в `choose`, затем
-```python
+@fine_payment_router.callback_query(FinePayCb.filter(F.action == "list"))
+async def pay_list(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    fines = [f for f in await get_active_fines(user.id) if f.cost] if user else []
+    if not fines:
+        await callback.answer("Нет штрафов для оплаты.", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    for i, fine in enumerate(fines, start=1):
+        kb.button(
+            text=f"{i}. {fine.description[:40]} — {fmt_points(fine.cost)} кадров",
+            callback_data=FinePayCb(action="choose", fine_id=fine.id).pack(),
+        )
+    kb.adjust(1)
+    await callback.message.answer("Выбери штраф для оплаты:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@fine_payment_router.callback_query(FinePayCb.filter(F.action == "choose"))
+async def pay_choose(callback: CallbackQuery, callback_data: FinePayCb):
+    loaded = await load_payable(callback, callback_data.fine_id)
+    if not loaded:
+        return
+    user, fine = loaded
     stars = fine_stars(fine.cost)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🎞 Кадрами — {fmt_points(fine.cost)}", callback_data=FinePayCb(action="cadrs", fine_id=fine.id).pack())
+    kb.button(text=f"⭐ Звёздами — {stars}", callback_data=FinePayCb(action="stars", fine_id=fine.id).pack())
+    kb.adjust(1)
+    await callback.message.answer(
+        f"Штраф: {fine.description}\n"
+        f"Стоимость: {fmt_points(fine.cost)} кадров или {stars} ⭐\n"
+        f"На счёте: {fmt_points(user.points)} кадров",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@fine_payment_router.callback_query(FinePayCb.filter(F.action == "cadrs"))
+async def pay_cadrs(callback: CallbackQuery, callback_data: FinePayCb):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала зарегистрируйтесь с помощью /start", show_alert=True)
+        return
+    fine = await get_fine(callback_data.fine_id)
+    result = await pay_fine_with_cadrs(callback_data.fine_id, user.id)
+    if result != "ok":
+        await callback.answer(CADRS_RESULT_TEXT[result], show_alert=True)
+        return
+    await callback.message.edit_text(f"✅ Штраф оплачен. Списано {fmt_points(fine.cost)} кадров.")
+    await callback.answer()
+
+
+@fine_payment_router.callback_query(FinePayCb.filter(F.action == "stars"))
+async def pay_stars(callback: CallbackQuery, callback_data: FinePayCb):
+    loaded = await load_payable(callback, callback_data.fine_id)
+    if not loaded:
+        return
+    user, fine = loaded
     await callback.message.answer_invoice(
         title="Оплата матч-штрафа",
         description=fine.description[:255],
-        payload=fine_payload(fine.id),
-        currency="XTR",
-        prices=[LabeledPrice(label="Матч-штраф", amount=stars)],
+        payload=fine_payload(fine.id, user.id),
+        currency=STARS_CURRENCY,
+        prices=[LabeledPrice(label="Матч-штраф", amount=fine_stars(fine.cost))],
     )
     await callback.answer()
-```
-  - `@fine_payment_router.pre_checkout_query()`:
-```python
-async def fine_pre_checkout(query: PreCheckoutQuery):
-    fine_id = parse_fine_payload(query.invoice_payload)
-    fine = await get_fine(fine_id) if fine_id else None
+
+
+@fine_payment_router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    parsed = parse_fine_payload(query.invoice_payload)
     user = await get_user(query.from_user.id)
-    if (not fine or not user or fine.user_id != user.id or fine.status != "active"
-            or query.currency != "XTR" or query.total_amount != fine_stars(fine.cost)):
-        await query.answer(ok=False, error_message="Штраф уже закрыт или изменился. Откройте личный кабинет заново.")
-        return
-    await query.answer(ok=True)
-```
-  - `@fine_payment_router.message(F.successful_payment)`:
-```python
-async def fine_paid(message: Message):
+    fine = await get_fine(parsed[0]) if parsed else None
+    ok = bool(
+        parsed and user and fine
+        and fine.user_id == user.id == parsed[1]
+        and fine.status == "active" and fine.cost
+        and query.currency == STARS_CURRENCY
+        and query.total_amount == fine_stars(fine.cost)
+    )
+    if ok:
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Штраф уже закрыт или изменился. Открой личный кабинет заново.")
+
+
+@fine_payment_router.message(F.successful_payment)
+async def successful_payment(message: Message):
     payment = message.successful_payment
-    fine_id = parse_fine_payload(payment.invoice_payload)
-    if fine_id is None:
+    parsed = parse_fine_payload(payment.invoice_payload)
+    fine_id = parsed[0] if parsed else 0
+    if parsed and await mark_fine_paid_stars(fine_id, payment.total_amount, payment.telegram_payment_charge_id):
+        await message.answer(f"✅ Штраф оплачен: {payment.total_amount} ⭐. Спасибо!")
         return
-    charge_id = payment.telegram_payment_charge_id
-    if await mark_fine_paid_stars(fine_id, payment.total_amount, charge_id):
-        await message.answer("✅ Штраф оплачен звёздами. Спасибо!")
-        return
-    await message.answer("Оплата получена, но штраф уже был закрыт. Администратор вернёт звёзды.")
-    note = (f"⚠️ Оплата за уже закрытый штраф #{fine_id}\n"
-            f"Пользователь: {message.from_user.id}\nЗвёзд: {payment.total_amount}\ncharge_id: {charge_id}")
+
+    # Штраф закрыли между pre_checkout и оплатой — звёзды нужно вернуть вручную
+    await message.answer("⚠️ Оплата получена, но штраф уже был закрыт. Администратор вернёт звёзды.")
+    note = (
+        f"⚠️ Оплата за закрытый штраф #{fine_id}\n"
+        f"Пользователь tg_id: {message.from_user.id}\n"
+        f"Звёзд: {payment.total_amount}\n"
+        f"charge_id: {payment.telegram_payment_charge_id}"
+    )
     for tg_id in await get_admin_tg_ids():
         try:
             await message.bot.send_message(tg_id, note)
         except TelegramAPIError:
             pass
 ```
-  - `fine_payload` / `parse_fine_payload`:
-```python
-def fine_payload(fine_id: int) -> str:
-    return f"fine:{fine_id}"
 
+- [ ] **Step 2: Подключить** — в `handlers/__init__.py`:
+  - импорт `from .fine_payment import fine_payment_router`
+  - после `user_router.include_router(user)` добавить `user_router.include_router(fine_payment_router)`
 
-def parse_fine_payload(payload) -> int | None:
-    prefix, _, raw = str(payload or "").partition(":")
-    if prefix != "fine" or not raw.isdigit():
-        return None
-    return int(raw)
+- [ ] **Step 3: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: OK, PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add handlers/fine_payment.py handlers/__init__.py
+git commit -m "feat: pay match fines with cadrs or Telegram Stars
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-- [ ] **Step 4:** `$PY -m pytest -q` — PASS.
-- [ ] **Step 5: Commit** `git add handlers/fine_payment.py tests/test_fine_payment.py && git commit -m "feat: pay fines with cadrs or Telegram Stars"`
 
 ---
 
-### Task 13: `handlers/training.py` — «Обучение» для пользователя
+## Этап 3 — статус наград, личный кабинет, меню
 
-**Files:** Create `handlers/training.py`.
+### Task 10: Статус выдачи наград
+
+**Files:**
+- Modify: `database/requests.py`, `handlers/fines.py`
+- Test: `tests/test_requests_users.py` (дописать)
 
 **Interfaces:**
-- Consumes: `database.training.{get_tests_with_counts, get_test, get_questions, question_to_dict, has_passed, last_failed_at, get_test_statuses, charge_points, record_attempt}`; `database.requests.get_user`; `utils.{fmt_points, start_decision, fmt_duration, is_quiz_passed}`.
-- Produces: `training_router: Router`; `TRAINING_BUTTON = "Обучение"`.
+- Produces:
+  - `database.requests.get_user_rewards_with_status(user_id: int) -> list[tuple[UserReward, Reward]]` (новые сверху)
+  - `database.requests.toggle_reward_issued(user_reward_id: int) -> tuple[bool, int | None, str] | None` — `(новый issued, tg_id владельца, название награды)`
 
-Поведение:
-- `TrainCb(CallbackData, prefix="train")`: `action: str` (`open | start`), `test_id: int`. `TrainAnswerCb(CallbackData, prefix="train_ans")`: `index: int`, `option: int`. `TrainStates.in_test`.
-- `cost_text(cost) -> str`: `"бесплатно"` при 0, иначе `f"{fmt_points(cost)} кадров"`.
-- `F.text == TRAINING_BUTTON` / `Command("training")`: нет регистрации → «Сначала зарегистрируйтесь с помощью /start». Нет тестов → «📚 Тестов пока нет.». Иначе текст
-```
-📚 Обучение
+- [ ] **Step 1: Падающий тест** — дописать в `tests/test_requests_users.py`:
 
-1. <title> — <count> вопросов — <cost_text> 🟢|🔴
-```
-  (статус из `get_test_statuses`) + кнопки `f"{i}. {title}"` → `open`, `adjust(1)`.
-- `open`: тест не найден → alert «Тест не найден.». Иначе новое сообщение `f"📘 {title}\n\nВопросов: {n}\nСтоимость: {cost_text}\nДля прохождения нужно 80% верных ответов."` + кнопка «▶️ Начать» → `start`.
-- `start`: тест/вопросы не найдены → alert «Тест не найден.»; `start_decision(await has_passed(...), await last_failed_at(...), user.points, test.cost, datetime.now())`:
-  - `passed` → alert «✅ Тест уже пройден»; `cooldown` → alert `f"Попробуй через {fmt_duration(left)}"`; `no_points` → alert «Недостаточно кадров».
-  - `ok` → `if not await charge_points(user.id, test.cost)`: alert «Недостаточно кадров»; иначе:
 ```python
-    await state.set_state(TrainStates.in_test)
-    await state.set_data({"tt_id": test.id, "tt_title": test.title,
-                          "tt_q": [question_to_dict(q) for q in questions], "tt_i": 0, "tt_ok": 0})
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.answer()
-    await send_question(callback.message, await state.get_data())
+from database.models import Reward, UserReward
+
+
+def add_reward_to(db, user_id, name="Камуфляж №1") -> int:
+    async def go():
+        async with db() as session:
+            reward = Reward(name=name, gift_link="https://x", price=1)
+            session.add(reward)
+            await session.flush()
+            ur = UserReward(user_id=user_id, reward_id=reward.id)
+            session.add(ur)
+            await session.commit()
+            return ur.id
+    return asyncio.run(go())
+
+
+def test_reward_status_toggle(db, make_user):
+    uid = make_user(tg_id=400)
+    ur_id = add_reward_to(db, uid)
+
+    [(ur, reward)] = asyncio.run(r.get_user_rewards_with_status(uid))
+    assert (ur.id, reward.name, ur.issued) == (ur_id, "Камуфляж №1", False)
+
+    assert asyncio.run(r.toggle_reward_issued(ur_id)) == (True, 400, "Камуфляж №1")
+    assert asyncio.run(r.toggle_reward_issued(ur_id)) == (False, 400, "Камуфляж №1")
+    assert asyncio.run(r.toggle_reward_issued(9999)) is None
 ```
-- `send_question(message, data)`: текст `f"❓ Вопрос {i+1}/{total}\n\n{text}\n\n1. ...\n2. ...\n3. ...\n4. ..."`, кнопки «1»…«4» (`TrainAnswerCb(index=i, option=n)`), `adjust(4)`. Без `parse_mode`.
-- `TrainAnswerCb.filter()`:
-  - состояние не `TrainStates.in_test` → alert «Тест прерван. Начни заново через «Обучение».» и снять кнопки (`edit_reply_markup(None)` в `try/except TelegramAPIError`).
-  - `callback_data.index != data["tt_i"]` → `callback.answer()` и выход (устаревшая кнопка/двойной клик).
-  - иначе: `ok += option == q["correct"]`, `i += 1`, `update_data`, `edit_text(message.text + f"\n\nТвой ответ: {option}")` (без кнопок), `callback.answer()`; если `i < total` — `send_question`; иначе финиш:
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_requests_users.py -v` → FAIL.
+
+- [ ] **Step 2: Запросы** — в `database/requests.py` после `get_user_rewards`:
+
 ```python
-    await state.clear()
-    passed = is_quiz_passed(ok, total)
-    user = await get_user(callback.from_user.id)
-    await record_attempt(user.id, data["tt_id"], ok, total, passed)
-    if passed:
-        text = f"✅ Тест «{data['tt_title']}» пройден! {ok} из {total} верно."
+async def get_user_rewards_with_status(user_id: int) -> list:
+    """[(UserReward, Reward), ...] — покупки пользователя со статусом выдачи."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserReward, Reward)
+            .join(Reward, Reward.id == UserReward.reward_id)
+            .where(UserReward.user_id == user_id)
+            .order_by(UserReward.created_at.desc(), UserReward.id.desc())
+        )
+        return [(ur, reward) for ur, reward in result.all()]
+
+
+async def toggle_reward_issued(user_reward_id: int):
+    """Переключает «выдан/не выдан». Возвращает (issued, tg_id владельца, название) или None."""
+    async with async_session() as session:
+        ur = await session.get(UserReward, user_reward_id)
+        if not ur:
+            return None
+        ur.issued = not ur.issued
+        issued = ur.issued
+        reward = await session.get(Reward, ur.reward_id)
+        owner = await session.get(User, ur.user_id)
+        await session.commit()
+        return issued, (owner.tg_id if owner else None), (reward.name if reward else "Награда")
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v` → PASS.
+
+- [ ] **Step 3: Админский список наград в `handlers/fines.py`**
+
+Импорты: добавить `get_user_rewards_with_status, toggle_reward_issued` в импорт из `database.requests`.
+
+Комментарий `FineAdminCb.action` дополнить `| rewards_list`. После `BanMsgCb` добавить:
+```python
+class RewardToggleCb(CallbackData, prefix="rw_tgl"):
+    user_reward_id: int
+    user_id: int
+```
+
+В `kb_admin_user_actions` в кортеж кнопок после `("Штрафы игрока", "fines_list"),` добавить `("Награды игрока", "rewards_list"),`.
+
+Рядом с `render_fines_list` добавить:
+```python
+def render_rewards_list(user, items) -> str:
+    if not items:
+        return f"У игрока {user.name} нет покупок."
+    lines = [f"Награды {user.name} (нажми, чтобы переключить):"]
+    lines += [f"{i}. {reward.name} — {'выдан ✅' if ur.issued else 'не выдан ❌'}"
+              for i, (ur, reward) in enumerate(items, start=1)]
+    return "\n".join(lines)
+
+
+def kb_rewards_list(user_id: int, items):
+    kb = InlineKeyboardBuilder()
+    for i, (ur, _reward) in enumerate(items, start=1):
+        kb.button(text=f"{'✅' if ur.issued else '❌'} №{i}",
+                  callback_data=RewardToggleCb(user_reward_id=ur.id, user_id=user_id).pack())
+    kb.button(text="◀️ К игроку", callback_data=FineAdminCb(action="card", user_id=user_id).pack())
+    kb.adjust(4)
+    return kb.as_markup()
+```
+
+В `admin_buttons` перед веткой `ban/unban`:
+```python
+    if action == "rewards_list":
+        items = await get_user_rewards_with_status(user.id)
+        await callback.message.answer(render_rewards_list(user, items), reply_markup=kb_rewards_list(user.id, items))
+        await callback.answer()
+        return
+```
+
+В конец файла:
+```python
+# ---------- Admin: reward issued toggle ----------
+
+@fines_router.callback_query(RewardToggleCb.filter())
+async def reward_toggle(callback: CallbackQuery, callback_data: RewardToggleCb):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
+
+    toggled = await toggle_reward_issued(callback_data.user_reward_id)
+    if toggled is None:
+        await callback.answer("Покупка не найдена.", show_alert=True)
+        return
+
+    issued, owner_tg_id, reward_name = toggled
+    await callback.answer("Выдан ✅" if issued else "Не выдан ❌")
+    if issued and owner_tg_id:
+        try:
+            await callback.bot.send_message(owner_tg_id, f"🎁 Награда «{reward_name}» выдана ✅")
+        except TelegramAPIError:
+            pass
+
+    user = await get_user_by_id(callback_data.user_id)
+    if user:
+        items = await get_user_rewards_with_status(user.id)
+        await callback.message.edit_text(render_rewards_list(user, items), reply_markup=kb_rewards_list(user.id, items))
+```
+
+- [ ] **Step 4: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: OK, PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add database/requests.py handlers/fines.py tests/test_requests_users.py
+git commit -m "feat: admins can mark purchased rewards as issued
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: Личный кабинет и новое меню
+
+**Files:**
+- Create: `handlers/cabinet.py`, `database/training.py`, `tests/test_cabinet.py`
+- Modify: `utils.py`, `keyboards/userkeyboard.py`, `keyboards/adminkeyboard.py`, `handlers/__init__.py`
+
+**Interfaces:**
+- Consumes: `get_user_rewards_with_status` (Task 10), `get_active_fines` (Task 6), `FinePayCb` (Task 9), `handlers.start.Name`
+- Produces:
+  - `utils.render_cabinet(name, points, rewards: list[tuple[str, bool]], tests: list[tuple[str, bool]], fines: list[tuple[str, float]]) -> str`
+  - `database.training.get_test_statuses(user_id: int) -> list[tuple[int, str, bool]]` — `(test_id, title, passed)` по `id`
+  - `keyboards.userkeyboard.user_rows(with_training: bool) -> list[list[KeyboardButton]]` — используется админской клавиатурой
+  - `handlers.cabinet.cabinet_router`, `CABINET_BUTTON = "Личный кабинет"`
+
+- [ ] **Step 1: Падающие тесты** — `tests/test_cabinet.py`:
+
+```python
+import asyncio
+
+from database import training as t
+from database.models import TrainingAttempt, TrainingTest
+from utils import render_cabinet
+
+
+def test_render_cabinet_full():
+    text = render_cabinet(
+        "Youra", 42,
+        rewards=[("Камуфляж №1", True), ("Камуфляж №2", False)],
+        tests=[("Тест А", True), ("Тест Б", False)],
+        fines=[("Оскорбление", 3), ("Старый штраф", 0)],
+    )
+    assert "👤 Ник: Youra" in text
+    assert "🎞 Кадры: 42" in text
+    assert " • Камуфляж №1 — выдан ✅" in text
+    assert " • Камуфляж №2 — не выдан ❌" in text
+    assert " • Тест А — пройден 🟢" in text
+    assert " • Тест Б — не пройден 🔴" in text
+    assert " 1. Оскорбление — 3 кадров" in text
+    assert " 2. Старый штраф" in text and "Старый штраф —" not in text
+
+
+def test_render_cabinet_empty():
+    text = render_cabinet("Youra", 0, rewards=[], tests=[], fines=[])
+    assert "🎁 Награды: нет" in text
+    assert "📚 Тесты: нет тестов" in text
+    assert "⚠️ Штрафы: нет" in text
+
+
+def test_get_test_statuses(db, make_user):
+    uid = make_user()
+
+    async def seed():
+        async with db() as session:
+            a, b = TrainingTest(title="А", cost=0), TrainingTest(title="Б", cost=0)
+            session.add_all([a, b])
+            await session.flush()
+            session.add_all([
+                TrainingAttempt(user_id=uid, test_id=a.id, correct_count=1, total=5, passed=False),
+                TrainingAttempt(user_id=uid, test_id=a.id, correct_count=5, total=5, passed=True),
+                TrainingAttempt(user_id=uid, test_id=b.id, correct_count=0, total=5, passed=False),
+            ])
+            await session.commit()
+            return a.id, b.id
+
+    a_id, b_id = asyncio.run(seed())
+    assert asyncio.run(t.get_test_statuses(uid)) == [(a_id, "А", True), (b_id, "Б", False)]
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_cabinet.py -v` → FAIL (`cannot import name 'training'`).
+
+- [ ] **Step 2: `render_cabinet`** — дописать в `utils.py`:
+
+```python
+# ── Личный кабинет ───────────────────────────────────────────────────────────
+
+def render_cabinet(name, points, rewards, tests, fines) -> str:
+    """rewards/tests — [(название, выдан/пройден)], fines — [(описание, стоимость)]."""
+    emoji, _ = cadr_tier(points)
+    lines = [f"👤 Ник: {name}", f"🎞 Кадры: {fmt_points(points)} {emoji}".rstrip(), ""]
+
+    if rewards:
+        lines.append("🎁 Награды:")
+        lines += [f" • {title} — {'выдан ✅' if ok else 'не выдан ❌'}" for title, ok in rewards]
     else:
-        text = f"{total - ok} ошибок из {total}. Попробуй ещё раз через 24 ч."
-    await callback.message.answer(text)
+        lines.append("🎁 Награды: нет")
+    lines.append("")
+
+    if tests:
+        lines.append("📚 Тесты:")
+        lines += [f" • {title} — {'пройден 🟢' if ok else 'не пройден 🔴'}" for title, ok in tests]
+    else:
+        lines.append("📚 Тесты: нет тестов")
+    lines.append("")
+
+    if fines:
+        lines.append("⚠️ Штрафы:")
+        lines += [f" {i}. {desc}" + (f" — {fmt_points(cost)} кадров" if cost else "")
+                  for i, (desc, cost) in enumerate(fines, start=1)]
+    else:
+        lines.append("⚠️ Штрафы: нет")
+    return "\n".join(lines)
 ```
-- [ ] **Step 1:** Реализация по описанию.
-- [ ] **Step 2:** `$PY -c "import handlers.training"`; `$PY -m pytest -q` — PASS.
-- [ ] **Step 3: Commit** `git add handlers/training.py && git commit -m "feat: training section for users"`
 
----
+- [ ] **Step 3: `database/training.py`** (остальные функции добавит Task 12):
 
-### Task 14: `handlers/admin_training.py` — конструктор тестов
-
-**Files:** Create `handlers/admin_training.py`.
-
-**Interfaces:**
-- Consumes: `database.training.{MAX_QUESTIONS, create_test, get_tests_with_counts, get_test, get_questions, update_test, update_question, add_question, delete_question, delete_test}`; `database.requests.is_admin`; `utils.{parse_amount, parse_options, fmt_points}`.
-- Produces: `admin_training_router: Router`; `TESTS_ADMIN_BUTTON = "Тесты ⚙️"`.
-
-Поведение (все обработчики проверяют `is_admin`):
-- CallbackData: `ATestCb(prefix="atest")`: `action: str`, `test_id: int = 0`; действия: `create`, `edit_list`, `delete_list`, `edit`, `title`, `cost`, `questions`, `add_q`, `del_q_list`, `delete`, `delete_yes`, `menu_back`. `AQuestionCb(prefix="aq")`: `action: str` (`edit | delete`), `question_id: int`, `test_id: int`. `ACorrectCb(prefix="acorr")`: `option: int`.
-- Состояния `ATestStates`: `title`, `cost`, `count`, `q_text`, `q_options`, `q_correct`, `new_title`, `new_cost`.
-- Вход `F.text == TESTS_ADMIN_BUTTON`: «⚙️ Тесты» + кнопки «Создать», «Изменить», «Удалить» (`adjust(3)`).
-- **Создать:** «Введите название теста:» → `title` (≥ 2 символов) → «Стоимость в кадрах (0 — бесплатно):» → `cost` (`parse_amount`) → `f"Сколько вопросов? (1–{MAX_QUESTIONS})"` → `count` (целое 1..25) → `state.update_data(mode="create", q_total=n, questions=[])` → цикл вопроса.
-- **Цикл вопроса** (общий для create / edit_q / add_q):
-  - `ask_question_text(message, data)`: для `create` — `f"Вопрос {len(questions)+1}/{q_total}: введите текст вопроса"`, иначе «Введите текст вопроса:» → `q_text`.
-  - `q_text` (непустой) → `cur_text` → «Отправьте 4 варианта ответа одним сообщением, каждый с новой строки:» → `q_options`.
-  - `q_options` → `parse_options` (ошибка → текст, остаёмся) → `cur_options` → «Какой вариант правильный?» + кнопки `ACorrectCb(1..4)`, `adjust(4)` → `q_correct`.
-  - `ACorrectCb` в состоянии `q_correct` (в другом состоянии → alert «Кнопка устарела.»): `q = {"text": cur_text, "options": cur_options, "correct": option}`, убрать кнопки, затем по `mode`:
-    - `create`: добавить в `questions`; если ещё не все — следующий вопрос; иначе `test_id = await create_test(title, cost, questions)`, `state.clear()`, «✅ Тест «{title}» создан ({n} вопросов).».
-    - `edit_q`: `update_question(question_id, q)` → «✅ Вопрос обновлён.» (или «❌ Вопрос не найден.»), `state.clear()`, меню теста.
-    - `add_q`: `add_question(test_id, q)` → «✅ Вопрос добавлен.» (False → «❌ Не удалось: достигнут лимит или тест удалён.»), `state.clear()`, меню теста.
-- **Изменить:** `edit_list` → список тестов кнопками → `edit` → `send_test_menu(message, test_id)`:
-  текст `f"📘 {title}\nСтоимость: {'бесплатно' if not cost else fmt_points(cost) + ' кадров'}\nВопросов: {n}"`, кнопки: «✏️ Название» (`title`), «💰 Стоимость» (`cost`), «📝 Вопросы» (`questions`), «➕ Добавить вопрос» (`add_q`, только если `n < MAX_QUESTIONS`), «➖ Удалить вопрос» (`del_q_list`, только если `n > 1`); `adjust(1)`. Тест не найден → «Тест не найден.».
-  - `title` → `new_title` → `update_test(test_id, title=...)` → меню. `cost` → `new_cost` → `parse_amount` → `update_test(test_id, cost=...)` → меню.
-  - `questions` → кнопки `f"{i}. {text[:40]}"` → `AQuestionCb(action="edit")` → `state.update_data(mode="edit_q", question_id=..., test_id=...)` → `ask_question_text`.
-  - `add_q` → `state.update_data(mode="add_q", test_id=...)` → `ask_question_text`.
-  - `del_q_list` → кнопки вопросов `AQuestionCb(action="delete")` → `delete_question` (False → alert «Нельзя удалить последний вопрос.») → меню.
-- **Удалить:** `delete_list` → список тестов → `delete` → «Удалить тест «{title}»? Попытки пользователей тоже удалятся.» + «Да, удалить» (`delete_yes`) / «Отмена» (`menu_back` → просто `edit_text("Отменено.")`) → `delete_test` → «🗑 Тест удалён.».
-- Пустой список тестов в `edit_list`/`delete_list` → alert «Тестов пока нет.».
-
-- [ ] **Step 1:** Реализация по описанию.
-- [ ] **Step 2:** `$PY -c "import handlers.admin_training"`; `$PY -m pytest -q` — PASS.
-- [ ] **Step 3: Commit** `git add handlers/admin_training.py && git commit -m "feat: admin test constructor"`
-
----
-
-## Волна 4
-
-### Task 12: `handlers/cabinet.py` — личный кабинет
-
-**Files:** Create `handlers/cabinet.py`.
-
-**Interfaces:**
-- Consumes: `utils.render_cabinet`; `database.requests.{get_user, get_user_rewards_with_status}`; `database.training.get_test_statuses` (→ `(id, title, passed)`); `database.fines.get_active_fines`; `handlers.fine_payment.FinePayCb` (`action="list", fine_id=0`); `handlers.start.Name` (состояние `Name.name`).
-- Produces: `cabinet_router: Router`; `CABINET_BUTTON = "Личный кабинет"`.
-
-- [ ] **Step 1:** Реализация:
 ```python
-from aiogram import F, Router
+"""Обучение: тесты, вопросы, попытки."""
+from sqlalchemy import delete, func, select, update
+
+from database.models import TrainingAttempt, TrainingQuestion, TrainingTest, User, async_session
+
+MAX_QUESTIONS = 25
+
+
+async def get_test_statuses(user_id: int) -> list:
+    """[(test_id, title, passed)] по всем тестам."""
+    async with async_session() as session:
+        tests = (await session.execute(
+            select(TrainingTest.id, TrainingTest.title).order_by(TrainingTest.id)
+        )).all()
+        passed = set((await session.scalars(
+            select(TrainingAttempt.test_id)
+            .where(TrainingAttempt.user_id == user_id, TrainingAttempt.passed.is_(True))
+        )).all())
+    return [(test_id, title, test_id in passed) for test_id, title in tests]
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v` → PASS.
+
+- [ ] **Step 4: `handlers/cabinet.py`**
+
+```python
+"""Личный кабинет: ник, кадры, награды, тесты, штрафы + оплата и смена ника."""
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -1694,112 +2464,1039 @@ from utils import render_cabinet
 cabinet_router = Router()
 
 CABINET_BUTTON = "Личный кабинет"
+RENAME_CALLBACK = "cab_rename"
 
 
 @cabinet_router.message(F.text == CABINET_BUTTON)
 @cabinet_router.message(Command("cabinet"))
-async def show_cabinet(message: Message):
+async def show_cabinet(message: Message, state: FSMContext):
+    await state.clear()
     user = await get_user(message.from_user.id)
     if not user or not user.name:
         await message.answer("Сначала зарегистрируйтесь с помощью /start")
         return
 
-    rewards = [(reward.name, user_reward.issued)
-               for user_reward, reward in await get_user_rewards_with_status(user.id)]
+    rewards = [(reward.name, ur.issued) for ur, reward in await get_user_rewards_with_status(user.id)]
     tests = [(title, passed) for _, title, passed in await get_test_statuses(user.id)]
     fines = await get_active_fines(user.id)
+    text = render_cabinet(user.name, user.points, rewards, tests, [(f.description, f.cost) for f in fines])
 
     kb = InlineKeyboardBuilder()
-    if any(fine.cost for fine in fines):
-        kb.button(text="💳 Оплатить штраф", callback_data=FinePayCb(action="list", fine_id=0).pack())
-    kb.button(text="✏️ Сменить ник", callback_data="cab_rename")
+    if any(f.cost for f in fines):
+        kb.button(text="💳 Оплатить штраф", callback_data=FinePayCb(action="list").pack())
+    kb.button(text="✏️ Сменить ник", callback_data=RENAME_CALLBACK)
     kb.adjust(1)
-
-    await message.answer(
-        render_cabinet(user.name, user.points, rewards, tests,
-                       [(fine.description, fine.cost) for fine in fines]),
-        reply_markup=kb.as_markup(),
-    )
+    await message.answer(text, reply_markup=kb.as_markup())
 
 
-@cabinet_router.callback_query(F.data == "cab_rename")
+@cabinet_router.callback_query(F.data == RENAME_CALLBACK)
 async def cabinet_rename(callback: CallbackQuery, state: FSMContext):
     await state.set_state(Name.name)
     await callback.message.answer("Напиши свой ник")
     await callback.answer()
 ```
-- [ ] **Step 2:** `$PY -c "import handlers.cabinet"` — без ошибок (Task 12 выполняется в волне 4, когда `handlers/fine_payment.py` уже слит; `handlers/__init__.py` на этот момент может ещё ссылаться на удалённый `.admin` — тогда проверяйте импорт через `importlib.util.spec_from_file_location`, как в Task 9 Step 3). `$PY -m pytest -q` — PASS.
-- [ ] **Step 3: Commit** `git add handlers/cabinet.py && git commit -m "feat: personal cabinet"`
 
----
+- [ ] **Step 5: Клавиатуры**
 
-### Task 15: Интеграция — роутеры и клавиатуры
-
-**Files:** Modify `handlers/__init__.py`, `keyboards/userkeyboard.py`, `keyboards/adminkeyboard.py`. Create `tests/test_imports.py`.
-
-- [ ] **Step 1:** `handlers/__init__.py`:
-  - `from .admin import admin` → `from .fines import fines_router`; добавить импорты `fine_payment_router`, `cabinet_router`, `training_router`, `admin_training_router`.
-  - `admin_router`: `admin_create`, `fines_router`, `admin_edit_router`, `admin_battles`, `admin_training_router`.
-  - `user_router`: `cabinet_router`, `fine_payment_router`, `training_router`, затем существующие `user`, `events_router`, `reward_router`, `battles_router`.
-- [ ] **Step 2:** `keyboards/userkeyboard.py`:
+`keyboards/userkeyboard.py` — заменить целиком:
 ```python
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def user_rows():
+def user_rows(with_training: bool = False) -> list:
+    """Основные кнопки пользователя (3×3). Кнопка «Обучение» появится вместе с разделом."""
+    middle = [KeyboardButton(text='Матч-штрафы')]
+    if with_training:
+        middle.append(KeyboardButton(text='Обучение'))
+    middle.append(KeyboardButton(text='Награды'))
     return [
         [KeyboardButton(text='Личный кабинет'), KeyboardButton(text='Правила'), KeyboardButton(text='🔍 Поиск')],
-        [KeyboardButton(text='Матч-штрафы'), KeyboardButton(text='Обучение'), KeyboardButton(text='Награды')],
+        middle,
         [KeyboardButton(text='Список танков'), KeyboardButton(text='Список сражений'), KeyboardButton(text='Список ивентов')],
     ]
 
 
 userboard = ReplyKeyboardMarkup(keyboard=user_rows(), resize_keyboard=True)
 ```
-- [ ] **Step 3:** `keyboards/adminkeyboard.py`:
+
+`keyboards/adminkeyboard.py` — заменить целиком:
 ```python
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 from .userkeyboard import user_rows
 
-adminboard = ReplyKeyboardMarkup(keyboard=user_rows() + [
+ADMIN_ROWS = [
     [KeyboardButton(text='Добавить ивент'), KeyboardButton(text='Редактировать ивент'), KeyboardButton(text='Удалить ивент')],
     [KeyboardButton(text='Добавить награду'), KeyboardButton(text='Изменить награду'), KeyboardButton(text='Удалить награду')],
     [KeyboardButton(text='Добавить танк'), KeyboardButton(text='Изменить танк'), KeyboardButton(text='Удалить танк')],
     [KeyboardButton(text='Добавить сражение'), KeyboardButton(text='Изменить сражение'), KeyboardButton(text='Удалить сражение')],
-    [KeyboardButton(text='Тесты ⚙️')],
-], resize_keyboard=True)
+]
+
+adminboard = ReplyKeyboardMarkup(keyboard=user_rows() + ADMIN_ROWS, resize_keyboard=True)
 ```
-- [ ] **Step 4:** `tests/test_imports.py` — каждая кнопка клавиатур имеет обработчик (текст упоминается в handlers):
-```python
-import pathlib
 
-import handlers  # noqa: F401  — импорт всех роутеров не падает
-from keyboards import adminboard, userboard
+- [ ] **Step 6: Подключить роутер** — в `handlers/__init__.py`: импорт `from .cabinet import cabinet_router`; `user_router.include_router(cabinet_router)` сразу после `fine_payment_router`.
 
-SOURCES = "\n".join(p.read_text(encoding="utf-8") for p in pathlib.Path("handlers").glob("*.py"))
+- [ ] **Step 7: Проверить**
 
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: OK, PASS. Проверить, что кнопки «Правила», «Награды», «Список танков», «Список сражений», «Список ивентов», «🔍 Поиск», «Матч-штрафы» имеют обработчики:
+`grep -n "'Правила'\|\"Награды\"\|'Список танков'\|\"Список сражений\"\|\"Список ивентов\"\|SEARCH_BUTTON\|FINES_BUTTONS\|CABINET_BUTTON" handlers/*.py`
 
-def test_every_button_has_handler():
-    for board in (userboard, adminboard):
-        for row in board.keyboard:
-            for button in row:
-                assert button.text in SOURCES, button.text
+- [ ] **Step 8: Commit**
+
+```bash
+git add handlers/cabinet.py database/training.py utils.py keyboards/userkeyboard.py keyboards/adminkeyboard.py handlers/__init__.py tests/test_cabinet.py
+git commit -m "feat: personal cabinet with rewards, tests, fines and new main menu
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
-- [ ] **Step 5:** `$PY -m pytest -q` — PASS; `$PY -c "import app"` — без ошибок.
-- [ ] **Step 6: Commit** `git add handlers/__init__.py keyboards/userkeyboard.py keyboards/adminkeyboard.py tests/test_imports.py && git commit -m "feat: wire new routers and 3x3 main menu"`
 
 ---
 
-## Ручной чек-лист (после Task 15, в Telegram)
+## Этап 4 — обучение
 
-1. Новый аккаунт: `/start` → ник → инструкция без меню → «Понятно!» → меню 3×3.
-2. Старый пользователь: приветствие не приходит; `/menu` показывает новое меню.
-3. «Правила» — строка «[Т-70В] и [RENWA]».
-4. Добавить танк с годами `1941-1945` → в карточке 1941…1945; изменить годы на `1939, 1941-1942`.
-5. Добавить сражение с GIF-картой → в «Список сражений» карта анимирована, «Назад» удаляет её.
-6. Админ: «Матч-штрафы» → по нику → «Добавить штраф» (описание, 2 кадра) → «Штрафы игрока» → «Снять» → в БД статус `removed`.
-7. Пользователь: «Личный кабинет» → штраф → «Оплатить штраф» → кадрами (при нехватке — alert) / звёздами (инвойс на 10 ⭐).
-8. Админ: «Награды игрока» → переключить ✅ → пользователю пришло уведомление, в кабинете «выдан ✅».
-9. Админ: «Заблокировать 🚫» → «Да» → текст → пользователь получил сообщение, любая кнопка → «🚫 Вы заблокированы»; «Разблокировать» → «Нет» → доступ вернулся.
-10. Админ: «Тесты ⚙️» → создать тест на 5 вопросов, стоимость 1 → пользователь: «Обучение» → пройти с 3/5 → «2 ошибок из 5. Попробуй ещё раз через 24 ч.», повторный старт → «Попробуй через 23 ч 59 мин»; кадры списаны.
+### Task 12: Запросы для тестов
+
+**Files:**
+- Modify: `database/training.py`
+- Create: `tests/test_training_db.py`
+
+**Interfaces:**
+- Produces (`database/training.py`), вопрос как dict: `{"text": str, "options": [str, str, str, str], "correct": int 1..4}`:
+  - `question_to_dict(q: TrainingQuestion) -> dict`
+  - `create_test(title: str, cost: float, questions: list[dict]) -> int` (ValueError при 0 или > 25 вопросах)
+  - `get_tests_with_counts() -> list[tuple[TrainingTest, int]]`
+  - `get_test(test_id) -> TrainingTest | None`, `get_questions(test_id) -> list[TrainingQuestion]` (по `position`), `get_question(question_id) -> TrainingQuestion | None`
+  - `update_test(test_id, **fields) -> bool`, `update_question(question_id, q: dict) -> bool`
+  - `add_question(test_id, q: dict) -> bool` (False при 25), `delete_question(question_id) -> bool` (False для последнего)
+  - `delete_test(test_id) -> bool` (удаляет вопросы и попытки)
+  - `has_passed(user_id, test_id) -> bool`, `last_failed_at(user_id, test_id) -> datetime | None`
+  - `charge_points(user_id, cost) -> bool` (атомарно; cost 0 → True)
+  - `record_attempt(user_id, test_id, correct, total, passed) -> bool` (False, если тест удалён)
+
+- [ ] **Step 1: Падающие тесты** — `tests/test_training_db.py`:
+
+```python
+import asyncio
+
+import pytest
+
+from database import training as t
+from database.requests import get_user_by_id
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def q(n: int, correct: int = 1) -> dict:
+    return {"text": f"Вопрос {n}", "options": ["a", "b", "c", "d"], "correct": correct}
+
+
+def test_create_and_read(db):
+    test_id = run(t.create_test("Тест А", 2.5, [q(1, 2), q(2, 4)]))
+    [(test, count)] = run(t.get_tests_with_counts())
+    assert (test.id, test.title, test.cost, count) == (test_id, "Тест А", 2.5, 2)
+    questions = run(t.get_questions(test_id))
+    assert [t.question_to_dict(x) for x in questions] == [q(1, 2), q(2, 4)]
+
+
+def test_create_validates_count(db):
+    with pytest.raises(ValueError):
+        run(t.create_test("x", 0, []))
+    with pytest.raises(ValueError):
+        run(t.create_test("x", 0, [q(i) for i in range(26)]))
+
+
+def test_edit_questions(db):
+    test_id = run(t.create_test("x", 0, [q(1)]))
+    [first] = run(t.get_questions(test_id))
+
+    assert run(t.delete_question(first.id)) is False  # последний вопрос не удаляется
+    assert run(t.add_question(test_id, q(2, 3))) is True
+    assert run(t.update_question(first.id, q(9, 4))) is True
+    assert [t.question_to_dict(x) for x in run(t.get_questions(test_id))] == [q(9, 4), q(2, 3)]
+    assert run(t.delete_question(first.id)) is True
+    assert len(run(t.get_questions(test_id))) == 1
+    assert run(t.update_test(test_id, title="Новое", cost=1)) is True
+    assert (run(t.get_test(test_id)).title, run(t.get_test(test_id)).cost) == ("Новое", 1)
+    assert run(t.update_test(999, title="x")) is False
+
+
+def test_add_question_limit(db):
+    test_id = run(t.create_test("x", 0, [q(i) for i in range(25)]))
+    assert run(t.add_question(test_id, q(26))) is False
+
+
+def test_attempts_and_delete(db, make_user):
+    uid = make_user()
+    test_id = run(t.create_test("x", 0, [q(1)]))
+    assert run(t.has_passed(uid, test_id)) is False
+    assert run(t.last_failed_at(uid, test_id)) is None
+
+    assert run(t.record_attempt(uid, test_id, 0, 1, False)) is True
+    assert run(t.last_failed_at(uid, test_id)) is not None
+    assert run(t.record_attempt(uid, test_id, 1, 1, True)) is True
+    assert run(t.has_passed(uid, test_id)) is True
+
+    assert run(t.delete_test(test_id)) is True
+    assert run(t.get_test(test_id)) is None
+    assert run(t.get_questions(test_id)) == []
+    assert run(t.get_test_statuses(uid)) == []
+    assert run(t.record_attempt(uid, test_id, 1, 1, True)) is False
+    assert run(t.delete_test(test_id)) is False
+
+
+def test_charge_points(make_user):
+    uid = make_user(points=5)
+    assert run(t.charge_points(uid, 0)) is True
+    assert run(t.charge_points(uid, 6)) is False
+    assert run(t.charge_points(uid, 2.5)) is True
+    assert run(get_user_by_id(uid)).points == 2.5
+```
+
+Run: `venv_new/Scripts/python.exe -m pytest tests/test_training_db.py -v` → FAIL (`no attribute 'create_test'`).
+
+- [ ] **Step 2: Реализовать** — дописать в `database/training.py`:
+
+```python
+def question_to_dict(q) -> dict:
+    return {"text": q.text, "options": [q.option_1, q.option_2, q.option_3, q.option_4], "correct": q.correct}
+
+
+def _question_columns(q: dict) -> dict:
+    o = q["options"]
+    return {"text": q["text"], "option_1": o[0], "option_2": o[1], "option_3": o[2],
+            "option_4": o[3], "correct": int(q["correct"])}
+
+
+async def create_test(title: str, cost: float, questions: list) -> int:
+    if not 1 <= len(questions) <= MAX_QUESTIONS:
+        raise ValueError(f"В тесте должно быть от 1 до {MAX_QUESTIONS} вопросов")
+    async with async_session() as session:
+        test = TrainingTest(title=title, cost=round(float(cost), 2))
+        session.add(test)
+        await session.flush()
+        for position, q in enumerate(questions, start=1):
+            session.add(TrainingQuestion(test_id=test.id, position=position, **_question_columns(q)))
+        await session.commit()
+        return test.id
+
+
+async def get_tests_with_counts() -> list:
+    async with async_session() as session:
+        rows = await session.execute(
+            select(TrainingTest, func.count(TrainingQuestion.id))
+            .outerjoin(TrainingQuestion, TrainingQuestion.test_id == TrainingTest.id)
+            .group_by(TrainingTest.id)
+            .order_by(TrainingTest.id)
+        )
+        return [(test, count) for test, count in rows.all()]
+
+
+async def get_test(test_id: int):
+    async with async_session() as session:
+        return await session.get(TrainingTest, test_id)
+
+
+async def get_questions(test_id: int) -> list:
+    async with async_session() as session:
+        result = await session.scalars(
+            select(TrainingQuestion)
+            .where(TrainingQuestion.test_id == test_id)
+            .order_by(TrainingQuestion.position, TrainingQuestion.id)
+        )
+        return list(result.all())
+
+
+async def get_question(question_id: int):
+    async with async_session() as session:
+        return await session.get(TrainingQuestion, question_id)
+
+
+async def update_test(test_id: int, **fields) -> bool:
+    async with async_session() as session:
+        test = await session.get(TrainingTest, test_id)
+        if not test:
+            return False
+        for name, value in fields.items():
+            setattr(test, name, value)
+        await session.commit()
+        return True
+
+
+async def update_question(question_id: int, q: dict) -> bool:
+    async with async_session() as session:
+        question = await session.get(TrainingQuestion, question_id)
+        if not question:
+            return False
+        for name, value in _question_columns(q).items():
+            setattr(question, name, value)
+        await session.commit()
+        return True
+
+
+async def _count_questions(session, test_id: int) -> int:
+    return await session.scalar(
+        select(func.count(TrainingQuestion.id)).where(TrainingQuestion.test_id == test_id)
+    )
+
+
+async def add_question(test_id: int, q: dict) -> bool:
+    async with async_session() as session:
+        if not await session.get(TrainingTest, test_id):
+            return False
+        if await _count_questions(session, test_id) >= MAX_QUESTIONS:
+            return False
+        last = await session.scalar(
+            select(func.max(TrainingQuestion.position)).where(TrainingQuestion.test_id == test_id)
+        )
+        session.add(TrainingQuestion(test_id=test_id, position=(last or 0) + 1, **_question_columns(q)))
+        await session.commit()
+        return True
+
+
+async def delete_question(question_id: int) -> bool:
+    async with async_session() as session:
+        question = await session.get(TrainingQuestion, question_id)
+        if not question or await _count_questions(session, question.test_id) <= 1:
+            return False
+        await session.delete(question)
+        await session.commit()
+        return True
+
+
+async def delete_test(test_id: int) -> bool:
+    # SQLite без PRAGMA foreign_keys не выполняет ON DELETE CASCADE — удаляем явно
+    async with async_session() as session:
+        test = await session.get(TrainingTest, test_id)
+        if not test:
+            return False
+        await session.execute(delete(TrainingAttempt).where(TrainingAttempt.test_id == test_id))
+        await session.execute(delete(TrainingQuestion).where(TrainingQuestion.test_id == test_id))
+        await session.delete(test)
+        await session.commit()
+        return True
+
+
+async def has_passed(user_id: int, test_id: int) -> bool:
+    async with async_session() as session:
+        found = await session.scalar(
+            select(TrainingAttempt.id)
+            .where(TrainingAttempt.user_id == user_id, TrainingAttempt.test_id == test_id,
+                   TrainingAttempt.passed.is_(True))
+            .limit(1)
+        )
+        return found is not None
+
+
+async def last_failed_at(user_id: int, test_id: int):
+    async with async_session() as session:
+        return await session.scalar(
+            select(TrainingAttempt.created_at)
+            .where(TrainingAttempt.user_id == user_id, TrainingAttempt.test_id == test_id,
+                   TrainingAttempt.passed.is_(False))
+            .order_by(TrainingAttempt.created_at.desc())
+            .limit(1)
+        )
+
+
+async def charge_points(user_id: int, cost: float) -> bool:
+    """Атомарно списывает кадры, если их хватает."""
+    if not cost:
+        return True
+    async with async_session() as session:
+        result = await session.execute(
+            update(User)
+            .where(User.id == user_id, User.points >= cost)
+            .values(points=func.round(User.points - cost, 2))
+        )
+        await session.commit()
+        return result.rowcount == 1
+
+
+async def record_attempt(user_id: int, test_id: int, correct: int, total: int, passed: bool) -> bool:
+    async with async_session() as session:
+        if not await session.get(TrainingTest, test_id):
+            return False
+        session.add(TrainingAttempt(user_id=user_id, test_id=test_id,
+                                    correct_count=correct, total=total, passed=passed))
+        await session.commit()
+        return True
+```
+
+- [ ] **Step 3: Запустить тесты**
+
+Run: `venv_new/Scripts/python.exe -m pytest tests -v`
+Expected: все PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add database/training.py tests/test_training_db.py
+git commit -m "feat: training tests storage, attempts and point charging
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 13: Раздел «Обучение» для пользователя
+
+**Files:**
+- Create: `handlers/training.py`
+- Modify: `handlers/__init__.py`
+
+**Interfaces:**
+- Consumes: всё из Task 12; `utils.start_decision/fmt_duration/is_quiz_passed/fmt_cost`
+- Produces: `training_router`, `TRAINING_BUTTON = "Обучение"`
+
+- [ ] **Step 1: Создать `handlers/training.py`**
+
+```python
+"""Раздел «Обучение»: список тестов и прохождение."""
+from datetime import datetime
+
+from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
+from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from database.requests import get_user
+from database.training import (
+    charge_points, get_questions, get_test, get_test_statuses, get_tests_with_counts,
+    has_passed, last_failed_at, question_to_dict, record_attempt,
+)
+from utils import fmt_cost, fmt_duration, is_quiz_passed, start_decision
+
+training_router = Router()
+
+TRAINING_BUTTON = "Обучение"
+
+
+class TrainCb(CallbackData, prefix="train"):
+    action: str  # open | start
+    test_id: int
+
+
+class TrainAnswerCb(CallbackData, prefix="train_ans"):
+    index: int
+    option: int
+
+
+class TrainStates(StatesGroup):
+    in_test = State()
+
+
+def question_text(data: dict) -> str:
+    i = data["tt_i"]
+    q = data["tt_q"][i]
+    options = "\n".join(f"{n}. {opt}" for n, opt in enumerate(q["options"], start=1))
+    return f"❓ Вопрос {i + 1}/{len(data['tt_q'])}\n\n{q['text']}\n\n{options}"
+
+
+async def send_question(message: Message, data: dict):
+    kb = InlineKeyboardBuilder()
+    for n in range(1, 5):
+        kb.button(text=str(n), callback_data=TrainAnswerCb(index=data["tt_i"], option=n).pack())
+    kb.adjust(4)
+    await message.answer(question_text(data), reply_markup=kb.as_markup())
+
+
+@training_router.message(F.text == TRAINING_BUTTON)
+@training_router.message(Command("training"))
+async def training_list(message: Message, state: FSMContext):
+    await state.clear()
+    user = await get_user(message.from_user.id)
+    if not user or not user.name:
+        await message.answer("Сначала зарегистрируйтесь с помощью /start")
+        return
+
+    tests = await get_tests_with_counts()
+    if not tests:
+        await message.answer("📚 Тестов пока нет.")
+        return
+
+    passed = {test_id: ok for test_id, _, ok in await get_test_statuses(user.id)}
+    lines = ["📚 Обучение", ""]
+    kb = InlineKeyboardBuilder()
+    for i, (test, count) in enumerate(tests, start=1):
+        mark = "🟢" if passed.get(test.id) else "🔴"
+        lines.append(f"{i}. {test.title} — {count} вопросов — {fmt_cost(test.cost)} {mark}")
+        kb.button(text=f"{i}. {test.title}", callback_data=TrainCb(action="open", test_id=test.id).pack())
+    kb.adjust(1)
+    await message.answer("\n".join(lines), reply_markup=kb.as_markup())
+
+
+@training_router.callback_query(TrainCb.filter(F.action == "open"))
+async def training_open(callback: CallbackQuery, callback_data: TrainCb):
+    test = await get_test(callback_data.test_id)
+    if not test:
+        await callback.answer("Тест не найден.", show_alert=True)
+        return
+    count = len(await get_questions(test.id))
+    kb = InlineKeyboardBuilder()
+    kb.button(text="▶️ Начать", callback_data=TrainCb(action="start", test_id=test.id).pack())
+    await callback.message.answer(
+        f"📘 {test.title}\n\n"
+        f"Вопросов: {count}\n"
+        f"Стоимость попытки: {fmt_cost(test.cost)}\n"
+        f"Для прохождения нужно 80% верных ответов.",
+        reply_markup=kb.as_markup(),
+    )
+    await callback.answer()
+
+
+@training_router.callback_query(TrainCb.filter(F.action == "start"))
+async def training_start(callback: CallbackQuery, callback_data: TrainCb, state: FSMContext):
+    user = await get_user(callback.from_user.id)
+    test = await get_test(callback_data.test_id)
+    questions = await get_questions(callback_data.test_id) if test else []
+    if not user or not test or not questions:
+        await callback.answer("Тест не найден.", show_alert=True)
+        return
+
+    decision, left = start_decision(
+        await has_passed(user.id, test.id),
+        await last_failed_at(user.id, test.id),
+        user.points, test.cost, datetime.now(),
+    )
+    if decision == "passed":
+        await callback.answer("✅ Тест уже пройден", show_alert=True)
+        return
+    if decision == "cooldown":
+        await callback.answer(f"Попробуй через {fmt_duration(left)}", show_alert=True)
+        return
+    if decision == "no_points" or not await charge_points(user.id, test.cost):
+        await callback.answer("Недостаточно кадров", show_alert=True)
+        return
+
+    await state.set_state(TrainStates.in_test)
+    data = {
+        "tt_id": test.id,
+        "tt_title": test.title,
+        "tt_q": [question_to_dict(q) for q in questions],
+        "tt_i": 0,
+        "tt_ok": 0,
+    }
+    await state.set_data(data)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await send_question(callback.message, data)
+
+
+@training_router.callback_query(TrainAnswerCb.filter())
+async def training_answer(callback: CallbackQuery, callback_data: TrainAnswerCb, state: FSMContext):
+    if await state.get_state() != TrainStates.in_test.state:
+        await callback.answer("Тест прерван. Начни заново через «Обучение».", show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+        return
+
+    data = await state.get_data()
+    if callback_data.index != data["tt_i"]:
+        await callback.answer()  # повторное нажатие на уже отвеченный вопрос
+        return
+
+    q = data["tt_q"][data["tt_i"]]
+    data["tt_ok"] += int(callback_data.option == q["correct"])
+    data["tt_i"] += 1
+    await state.update_data(tt_i=data["tt_i"], tt_ok=data["tt_ok"])
+    await callback.message.edit_text(f"{callback.message.text}\n\nТвой ответ: {callback_data.option}")
+    await callback.answer()
+
+    total = len(data["tt_q"])
+    if data["tt_i"] < total:
+        await send_question(callback.message, data)
+        return
+
+    await state.clear()
+    correct = data["tt_ok"]
+    passed = is_quiz_passed(correct, total)
+    user = await get_user(callback.from_user.id)
+    if user:
+        await record_attempt(user.id, data["tt_id"], correct, total, passed)
+    if passed:
+        await callback.message.answer(f"✅ Тест «{data['tt_title']}» пройден! {correct} из {total} верно.")
+    else:
+        await callback.message.answer(f"{total - correct} ошибок из {total}. Попробуй ещё раз через 24 ч.")
+```
+
+- [ ] **Step 2: Подключить** — в `handlers/__init__.py`: импорт `from .training import training_router`; `user_router.include_router(training_router)` после `cabinet_router`.
+
+- [ ] **Step 3: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: OK, PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add handlers/training.py handlers/__init__.py
+git commit -m "feat: training section with paid attempts and 24h cooldown
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 14: Конструктор тестов для админа и кнопки в меню
+
+**Files:**
+- Create: `handlers/admin_training.py`
+- Modify: `handlers/__init__.py`, `keyboards/userkeyboard.py`, `keyboards/adminkeyboard.py`
+
+**Interfaces:**
+- Consumes: всё из Task 12; `utils.parse_amount/parse_options/fmt_cost`
+- Produces: `admin_training`, `TESTS_ADMIN_BUTTON = "Тесты ⚙️"`
+
+- [ ] **Step 1: Создать `handlers/admin_training.py`**
+
+```python
+"""Конструктор тестов: создание, изменение, удаление (только админ)."""
+from aiogram import Router, F
+from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from database.requests import is_admin
+from database.training import (
+    MAX_QUESTIONS, add_question, create_test, delete_question, delete_test, get_question,
+    get_questions, get_test, get_tests_with_counts, update_question, update_test,
+)
+from utils import fmt_cost, parse_amount, parse_options
+
+admin_training = Router()
+
+TESTS_ADMIN_BUTTON = "Тесты ⚙️"
+
+
+class ATestCb(CallbackData, prefix="atest"):
+    # create | edit_list | delete_list | edit | delete | delete_yes | cancel
+    # | title | cost | questions | add_q | del_q_list
+    action: str
+    test_id: int = 0
+
+
+class AQuestionCb(CallbackData, prefix="aq"):
+    action: str  # edit | delete
+    question_id: int
+    test_id: int
+
+
+class ACorrectCb(CallbackData, prefix="acorr"):
+    option: int
+
+
+class ATestStates(StatesGroup):
+    title = State()
+    cost = State()
+    count = State()
+    q_text = State()
+    q_options = State()
+    q_correct = State()
+    new_title = State()
+    new_cost = State()
+
+
+async def admin_only(event, state: FSMContext = None) -> bool:
+    """True — можно продолжать; иначе сообщает об отказе и сбрасывает состояние."""
+    if await is_admin(event.from_user.id):
+        return True
+    if state:
+        await state.clear()
+    if isinstance(event, CallbackQuery):
+        await event.answer("Доступно только администратору.", show_alert=True)
+    else:
+        await event.answer("Доступно только администратору.")
+    return False
+
+
+def kb_main():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Создать", callback_data=ATestCb(action="create").pack())
+    kb.button(text="✏️ Изменить", callback_data=ATestCb(action="edit_list").pack())
+    kb.button(text="🗑 Удалить", callback_data=ATestCb(action="delete_list").pack())
+    kb.adjust(3)
+    return kb.as_markup()
+
+
+async def send_test_menu(message: Message, test_id: int):
+    test = await get_test(test_id)
+    if not test:
+        await message.answer("❌ Тест не найден.")
+        return
+    count = len(await get_questions(test_id))
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Название", callback_data=ATestCb(action="title", test_id=test_id).pack())
+    kb.button(text="💰 Стоимость", callback_data=ATestCb(action="cost", test_id=test_id).pack())
+    kb.button(text="📝 Изменить вопрос", callback_data=ATestCb(action="questions", test_id=test_id).pack())
+    if count < MAX_QUESTIONS:
+        kb.button(text="➕ Добавить вопрос", callback_data=ATestCb(action="add_q", test_id=test_id).pack())
+    if count > 1:
+        kb.button(text="➖ Удалить вопрос", callback_data=ATestCb(action="del_q_list", test_id=test_id).pack())
+    kb.adjust(1)
+    await message.answer(
+        f"📘 {test.title}\nСтоимость: {fmt_cost(test.cost)}\nВопросов: {count}",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def ask_question_text(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("mode") == "create":
+        header = f"Вопрос {len(data['questions']) + 1}/{data['q_total']}"
+    else:
+        header = "Вопрос"
+    await state.set_state(ATestStates.q_text)
+    await message.answer(f"{header}: введите текст вопроса:")
+
+
+# ---------- Entry ----------
+
+@admin_training.message(F.text == TESTS_ADMIN_BUTTON)
+async def tests_menu(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    await state.clear()
+    await message.answer("⚙️ Управление тестами", reply_markup=kb_main())
+
+
+# ---------- Create: название → стоимость → количество ----------
+
+@admin_training.callback_query(ATestCb.filter(F.action == "create"))
+async def create_start(callback: CallbackQuery, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    await state.clear()
+    await state.set_state(ATestStates.title)
+    await callback.message.answer("Введите название теста:")
+    await callback.answer()
+
+
+@admin_training.message(ATestStates.title)
+async def create_title(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    title = (message.text or "").strip()
+    if len(title) < 2:
+        await message.answer("Название — минимум 2 символа. Введите ещё раз:")
+        return
+    await state.update_data(title=title)
+    await state.set_state(ATestStates.cost)
+    await message.answer("Стоимость попытки в кадрах (0 — бесплатно):")
+
+
+@admin_training.message(ATestStates.cost)
+async def create_cost(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    try:
+        cost = parse_amount(message.text)
+    except ValueError as e:
+        await message.answer(f"⚠️ {e}")
+        return
+    await state.update_data(cost=cost)
+    await state.set_state(ATestStates.count)
+    await message.answer(f"Сколько вопросов? (1–{MAX_QUESTIONS})")
+
+
+@admin_training.message(ATestStates.count)
+async def create_count(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    try:
+        total = int((message.text or "").strip())
+    except ValueError:
+        total = 0
+    if not 1 <= total <= MAX_QUESTIONS:
+        await message.answer(f"Нужно число от 1 до {MAX_QUESTIONS}:")
+        return
+    await state.update_data(mode="create", q_total=total, questions=[])
+    await ask_question_text(message, state)
+
+
+# ---------- Вопрос: текст → 4 варианта → правильный (общее для create / edit_q / add_q) ----------
+
+@admin_training.message(ATestStates.q_text)
+async def got_q_text(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    text = (message.text or "").strip()
+    if len(text) < 2:
+        await message.answer("Текст вопроса — минимум 2 символа. Введите ещё раз:")
+        return
+    await state.update_data(cur_text=text)
+    await state.set_state(ATestStates.q_options)
+    await message.answer("Отправьте 4 варианта ответа одним сообщением — каждый с новой строки:")
+
+
+@admin_training.message(ATestStates.q_options)
+async def got_q_options(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    try:
+        options = parse_options(message.text)
+    except ValueError as e:
+        await message.answer(f"⚠️ {e}")
+        return
+    await state.update_data(cur_options=options)
+    await state.set_state(ATestStates.q_correct)
+    kb = InlineKeyboardBuilder()
+    for n in range(1, 5):
+        kb.button(text=str(n), callback_data=ACorrectCb(option=n).pack())
+    kb.adjust(4)
+    listing = "\n".join(f"{n}. {opt}" for n, opt in enumerate(options, start=1))
+    await message.answer(f"{listing}\n\nКакой вариант правильный?", reply_markup=kb.as_markup())
+
+
+@admin_training.callback_query(ATestStates.q_correct, ACorrectCb.filter())
+async def got_q_correct(callback: CallbackQuery, callback_data: ACorrectCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    data = await state.get_data()
+    q = {"text": data["cur_text"], "options": data["cur_options"], "correct": callback_data.option}
+    await callback.message.edit_text(f"{callback.message.text}\n\nПравильный: {callback_data.option}")
+    await callback.answer()
+
+    mode = data.get("mode")
+    if mode == "create":
+        questions = data["questions"] + [q]
+        if len(questions) < data["q_total"]:
+            await state.update_data(questions=questions)
+            await ask_question_text(callback.message, state)
+            return
+        await create_test(data["title"], data["cost"], questions)
+        await state.clear()
+        await callback.message.answer(f"✅ Тест «{data['title']}» создан: {len(questions)} вопросов.")
+        return
+
+    if mode == "edit_q":
+        ok = await update_question(data["question_id"], q)
+        result = "✅ Вопрос обновлён." if ok else "❌ Вопрос не найден."
+    else:  # add_q
+        ok = await add_question(data["test_id"], q)
+        result = "✅ Вопрос добавлен." if ok else f"❌ Не удалось добавить (максимум {MAX_QUESTIONS})."
+    test_id = data["test_id"]
+    await state.clear()
+    await callback.message.answer(result)
+    await send_test_menu(callback.message, test_id)
+
+
+# ---------- Выбор теста для изменения / удаления ----------
+
+@admin_training.callback_query(ATestCb.filter(F.action.in_({"edit_list", "delete_list"})))
+async def pick_test(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    tests = await get_tests_with_counts()
+    if not tests:
+        await callback.answer("Тестов пока нет.", show_alert=True)
+        return
+    action = "edit" if callback_data.action == "edit_list" else "delete"
+    kb = InlineKeyboardBuilder()
+    for test, count in tests:
+        kb.button(text=f"{test.title} ({count})", callback_data=ATestCb(action=action, test_id=test.id).pack())
+    kb.adjust(1)
+    await callback.message.answer("Выберите тест:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@admin_training.callback_query(ATestCb.filter(F.action == "edit"))
+async def edit_menu(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    await state.clear()
+    await send_test_menu(callback.message, callback_data.test_id)
+    await callback.answer()
+
+
+# ---------- Изменение названия / стоимости ----------
+
+@admin_training.callback_query(ATestCb.filter(F.action.in_({"title", "cost"})))
+async def edit_field_start(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    await state.clear()
+    await state.update_data(test_id=callback_data.test_id)
+    if callback_data.action == "title":
+        await state.set_state(ATestStates.new_title)
+        await callback.message.answer("Введите новое название:")
+    else:
+        await state.set_state(ATestStates.new_cost)
+        await callback.message.answer("Введите новую стоимость в кадрах (0 — бесплатно):")
+    await callback.answer()
+
+
+@admin_training.message(ATestStates.new_title)
+async def edit_title_apply(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    title = (message.text or "").strip()
+    if len(title) < 2:
+        await message.answer("Название — минимум 2 символа. Введите ещё раз:")
+        return
+    test_id = (await state.get_data())["test_id"]
+    await state.clear()
+    ok = await update_test(test_id, title=title)
+    await message.answer("✅ Название обновлено." if ok else "❌ Тест не найден.")
+    if ok:
+        await send_test_menu(message, test_id)
+
+
+@admin_training.message(ATestStates.new_cost)
+async def edit_cost_apply(message: Message, state: FSMContext):
+    if not await admin_only(message, state):
+        return
+    try:
+        cost = parse_amount(message.text)
+    except ValueError as e:
+        await message.answer(f"⚠️ {e}")
+        return
+    test_id = (await state.get_data())["test_id"]
+    await state.clear()
+    ok = await update_test(test_id, cost=cost)
+    await message.answer("✅ Стоимость обновлена." if ok else "❌ Тест не найден.")
+    if ok:
+        await send_test_menu(message, test_id)
+
+
+# ---------- Вопросы: изменить / добавить / удалить ----------
+
+@admin_training.callback_query(ATestCb.filter(F.action.in_({"questions", "del_q_list"})))
+async def question_list(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    questions = await get_questions(callback_data.test_id)
+    if not questions:
+        await callback.answer("Вопросов нет.", show_alert=True)
+        return
+    action = "edit" if callback_data.action == "questions" else "delete"
+    kb = InlineKeyboardBuilder()
+    for i, q in enumerate(questions, start=1):
+        kb.button(text=f"{i}. {q.text[:40]}",
+                  callback_data=AQuestionCb(action=action, question_id=q.id, test_id=callback_data.test_id).pack())
+    kb.adjust(1)
+    prompt = "Какой вопрос изменить?" if action == "edit" else "Какой вопрос удалить?"
+    await callback.message.answer(prompt, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@admin_training.callback_query(AQuestionCb.filter(F.action == "edit"))
+async def question_edit_start(callback: CallbackQuery, callback_data: AQuestionCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    q = await get_question(callback_data.question_id)
+    if not q:
+        await callback.answer("Вопрос не найден.", show_alert=True)
+        return
+    await state.clear()
+    await state.update_data(mode="edit_q", question_id=q.id, test_id=callback_data.test_id)
+    options = "\n".join(f"{n}. {opt}" for n, opt in enumerate([q.option_1, q.option_2, q.option_3, q.option_4], start=1))
+    await callback.message.answer(f"Сейчас:\n{q.text}\n\n{options}\n\nПравильный: {q.correct}")
+    await callback.answer()
+    await ask_question_text(callback.message, state)
+
+
+@admin_training.callback_query(AQuestionCb.filter(F.action == "delete"))
+async def question_delete(callback: CallbackQuery, callback_data: AQuestionCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    if not await delete_question(callback_data.question_id):
+        await callback.answer("Нельзя удалить последний вопрос.", show_alert=True)
+        return
+    await callback.answer("🗑 Вопрос удалён")
+    await send_test_menu(callback.message, callback_data.test_id)
+
+
+@admin_training.callback_query(ATestCb.filter(F.action == "add_q"))
+async def question_add_start(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    await state.clear()
+    await state.update_data(mode="add_q", test_id=callback_data.test_id)
+    await callback.answer()
+    await ask_question_text(callback.message, state)
+
+
+# ---------- Удаление теста ----------
+
+@admin_training.callback_query(ATestCb.filter(F.action == "delete"))
+async def delete_confirm(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    test = await get_test(callback_data.test_id)
+    if not test:
+        await callback.answer("Тест не найден.", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Да, удалить", callback_data=ATestCb(action="delete_yes", test_id=test.id).pack())
+    kb.button(text="Отмена", callback_data=ATestCb(action="cancel").pack())
+    kb.adjust(2)
+    await callback.message.answer(f"Удалить тест «{test.title}» вместе с вопросами и попытками?",
+                                  reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@admin_training.callback_query(ATestCb.filter(F.action == "delete_yes"))
+async def delete_apply(callback: CallbackQuery, callback_data: ATestCb, state: FSMContext):
+    if not await admin_only(callback, state):
+        return
+    ok = await delete_test(callback_data.test_id)
+    await callback.message.edit_text("🗑 Тест удалён." if ok else "❌ Тест не найден.")
+    await callback.answer()
+
+
+@admin_training.callback_query(ATestCb.filter(F.action == "cancel"))
+async def delete_cancel(callback: CallbackQuery):
+    await callback.message.edit_text("Отменено.")
+    await callback.answer()
+```
+
+- [ ] **Step 2: Подключить** — в `handlers/__init__.py`: импорт `from .admin_training import admin_training`; `admin_router.include_router(admin_training)` после `admin_battles`.
+
+- [ ] **Step 3: Кнопки в меню**
+  - `keyboards/userkeyboard.py`: `userboard = ReplyKeyboardMarkup(keyboard=user_rows(with_training=True), resize_keyboard=True)`
+  - `keyboards/adminkeyboard.py`: в конец `ADMIN_ROWS` добавить `[KeyboardButton(text='Тесты ⚙️')],`; `adminboard = ReplyKeyboardMarkup(keyboard=user_rows(with_training=True) + ADMIN_ROWS, resize_keyboard=True)`
+
+- [ ] **Step 4: Проверить**
+
+Run: `venv_new/Scripts/python.exe -c "import app" && venv_new/Scripts/python.exe -m pytest tests -q`
+Expected: OK, PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add handlers/admin_training.py handlers/__init__.py keyboards/userkeyboard.py keyboards/adminkeyboard.py
+git commit -m "feat: admin test builder and training buttons in menus
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+## Ручной чек-лист в Telegram (после всех задач)
+
+Запуск: `venv_new/Scripts/python.exe app.py` (на тестовом боте / копии БД).
+
+1. Новый аккаунт: `/start` → ник → «Понятно!» → меню 3×3. `/start` повторно — ничего. `/menu` — меню.
+2. Старый аккаунт: приветствие не приходит, `/menu` показывает новое меню.
+3. Добавить танк с годами `1941-1945` → в карточке `1941, 1942, 1943, 1944, 1945`. Изменить годы на `1939, 1941-1942`.
+4. Добавить сражение с GIF-картой → в «Список сражений» карта анимирована; «Назад» удаляет анимацию.
+5. «Правила» — строка про [Т-70В] и [RENWA].
+6. Админ: «Матч-штрафы» → «По нику» → «Добавить штраф» (описание, 2 кадра) → «Штрафы игрока» → «Снять №1» → штраф исчез у игрока.
+7. Игрок: «Личный кабинет» → штраф 2 кадра → «Оплатить штраф» → «Кадрами» (при нехватке — alert) → штраф исчез, кадры списаны.
+8. То же «Звёздами — 10 ⭐» → инвойс → оплата → «✅ Штраф оплачен».
+9. Админ: «Заблокировать 🚫» → «Да» → текст → игрок получает сообщение; любое действие игрока → «🚫 Вы заблокированы». «Разблокировать» → «Нет» → игрок снова работает без уведомления.
+10. Админ: «Награды игрока» → переключить ❌→✅ → игрок получает уведомление; в кабинете «выдан ✅».
+11. Админ: «Тесты ⚙️» → создать тест (стоимость 1, 2 вопроса) → игрок «Обучение» → пройти с ошибками → «n ошибок из z. Попробуй ещё раз через 24 ч.» → повторный старт → «Попробуй через 23 ч …». Пройти другой тест без ошибок → в кабинете 🟢, повторный старт → «Тест уже пройден».
+12. «отмена» посреди создания теста — состояние сброшено, тест не создан.
