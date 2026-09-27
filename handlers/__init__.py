@@ -2,7 +2,7 @@ from aiogram import Router
 
 from .start import start
 from .admin_create import admin_create
-from .admin import admin
+from .fines import fines_router
 from .change_event import admin_edit_router
 from .admin_battles import admin_battles
 from .usercommands import user
@@ -18,7 +18,7 @@ main_router.include_router(start)
 # ── Админский роутер ─────────────────────────────────────────────────────────
 admin_router = Router(name="admin")
 admin_router.include_router(admin_create)
-admin_router.include_router(admin)
+admin_router.include_router(fines_router)
 admin_router.include_router(admin_edit_router)
 admin_router.include_router(admin_battles)
 
