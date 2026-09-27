@@ -6,7 +6,7 @@ from database.requests import get_user, get_events
 from keyboards import adminboard, userboard
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from utils import cadr_message
+from utils import cadr_message, parse_years, YEAR_HINT
 
 user = Router()
 
@@ -813,9 +813,8 @@ async def process_tank_type(message: Message, state: FSMContext):
     
     await message.answer(
         "✅ Тип сохранен!\n\n"
-        "📅 Шаг 4/6: Введите годы создания танка через запятую:\n"
-        "<i>Пример: 1939, 1940, 1941</i>\n"
-        "<i>Или один год: 1942</i>",
+        "📅 Шаг 4/6: Введите годы использования танка:\n"
+        f"<i>{YEAR_HINT}</i>",
         parse_mode="HTML"
     )
     await state.set_state(TankStates.waiting_tank_years)
@@ -826,43 +825,19 @@ async def process_tank_years(message: Message, state: FSMContext):
     if message.text == "отмена":
         await state.clear()
         return
-    years_input = message.text.strip()
-    
     try:
-        years_list = [y.strip() for y in years_input.split(',')]
-        valid_years = []
-        
-        for year_str in years_list:
-            if not year_str:
-                continue
-            year = int(year_str)
-            if 1900 <= year <= datetime.now().year:
-                valid_years.append(year)
-            else:
-                await message.answer(
-                    f"⚠️ Год {year} некорректен. Годы должны быть от 1900 до {datetime.now().year}.\n"
-                    "Пожалуйста, введите годы через запятую еще раз:"
-                )
-                return
-        
-        if not valid_years:
-            await message.answer("⚠️ Не указано ни одного корректного года. Введите годы через запятую:")
-            return
-        
-        valid_years = sorted(list(set(valid_years)))
-        
-        await state.update_data(years=valid_years)
-        
-        await message.answer(
-            f"✅ Годы сохранены: {', '.join(map(str, valid_years))}\n\n"
-            "📄 Шаг 5/6: Введите описание танка:",
-            parse_mode="HTML"
-        )
-        await state.set_state(TankStates.waiting_tank_description)
-        
-    except ValueError:
-        await message.answer("⚠️ Пожалуйста, введите годы цифрами через запятую (например: 1939, 1940, 1941):")
+        valid_years = parse_years(message.text)
+    except ValueError as e:
+        await message.answer(f"⚠️ {e}\nВведите годы ещё раз:")
         return
+
+    await state.update_data(years=valid_years)
+    await message.answer(
+        f"✅ Годы сохранены: {', '.join(map(str, valid_years))}\n\n"
+        "📄 Шаг 5/6: Введите описание танка:",
+        parse_mode="HTML"
+    )
+    await state.set_state(TankStates.waiting_tank_description)
 
 
 @user.message(TankStates.waiting_tank_description)
@@ -991,7 +966,7 @@ async def process_tank_to_edit(message: Message, state: FSMContext):
         "1. 🎖️ Название\n"
         "2. 🇺🇳 Нация\n"
         "3. 🔰 Тип\n"
-        "4. 📅 Годы (через запятую)\n"
+        "4. 📅 Годы\n"
         "5. 📝 Описание\n"
         "6. 🖼️ Фотография\n\n"
         "🔢 <b>Введите номера через запятую:</b>"
@@ -1046,7 +1021,7 @@ async def process_edit_choice(message: Message, state: FSMContext):
         years_str = ", ".join(map(str, current_years)) if current_years else "Нет годов"
         await message.answer(
             f"📅 <b>Текущие годы:</b> {years_str}\n"
-            "Введите новые годы через запятую:",
+            f"Введите новые годы. {YEAR_HINT}:",
             parse_mode="HTML"
         )
         await state.set_state(TankStates.waiting_new_years)
@@ -1121,45 +1096,22 @@ async def process_new_years(message: Message, state: FSMContext):
     if message.text == "отмена":
         await state.set_state(TankStates.nothing)
         return
-    years_input = message.text.strip()
     data = await state.get_data()
     tank = data.get('selected_tank')
     choices = data.get('edit_choices', [])
-    
+
     try:
-        years_list = [y.strip() for y in years_input.split(',')]
-        valid_years = []
-        
-        for year_str in years_list:
-            if not year_str:
-                continue
-            year = int(year_str)
-            if 1900 <= year <= datetime.now().year:
-                valid_years.append(year)
-            else:
-                await message.answer(
-                    f"⚠️ Год {year} некорректен. Годы должны быть от 1900 до {datetime.now().year}.\n"
-                    "Пожалуйста, введите годы через запятую еще раз:"
-                )
-                return
-        
-        if not valid_years:
-            await message.answer("⚠️ Не указано ни одного корректного года. Введите годы через запятую:")
-            return
-        
-        valid_years = sorted(list(set(valid_years)))
-        
-        success = await update_tank_years(tank.id, valid_years)
-        
-        if success:
-            await process_remaining_edits(message, state, choices, 4, f"✅ Годы танка обновлены: {', '.join(map(str, valid_years))}")
-        else:
-            await message.answer("❌ Не удалось обновить годы танка.")
-            await state.clear()
-            
-    except ValueError:
-        await message.answer("⚠️ Пожалуйста, введите годы цифрами через запятую:")
+        valid_years = parse_years(message.text)
+    except ValueError as e:
+        await message.answer(f"⚠️ {e}\nВведите годы ещё раз:")
         return
+
+    success = await update_tank_years(tank.id, valid_years)
+    if success:
+        await process_remaining_edits(message, state, choices, 4, f"✅ Годы танка обновлены: {', '.join(map(str, valid_years))}")
+    else:
+        await message.answer("❌ Не удалось обновить годы танка.")
+        await state.clear()
 
 # Обработка изменения описания
 @user.message(TankStates.waiting_new_description)
@@ -1259,7 +1211,7 @@ async def process_next_edit_step(message: Message, state: FSMContext, next_choic
     elif next_choice == 4:
         years_str = ", ".join(map(str, current_years)) if current_years else "Нет годов"
         await message.answer(
-            f"📅 Введите новые годы создания танка через запятую\nТекущие: {years_str}:",
+            f"📅 Введите новые годы использования танка ({YEAR_HINT})\nТекущие: {years_str}:",
             parse_mode="HTML"
         )
         await state.set_state(TankStates.waiting_new_years)
