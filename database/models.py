@@ -16,11 +16,13 @@ class Base(AsyncAttrs, DeclarativeBase):
 class User(Base):
     __tablename__ = 'users'
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(nullable=True) 
+    name: Mapped[str] = mapped_column(nullable=True)
     tg_id = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(nullable=True)
     points: Mapped[float] = mapped_column(nullable=True, default=0.0)
-    fine: Mapped[str] = mapped_column()
+    fine: Mapped[str] = mapped_column(nullable=True)  # legacy: штрафы теперь в таблице fines
+    is_banned: Mapped[bool] = mapped_column(default=False)
+    onboarded: Mapped[bool] = mapped_column(default=False)
 
 
 class UserEvent(Base):
@@ -78,6 +80,7 @@ class UserReward(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     reward_id: Mapped[int] = mapped_column(ForeignKey('rewards.id'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    issued: Mapped[bool] = mapped_column(default=False)
 
 
 class Battle(Base):
@@ -89,8 +92,58 @@ class Battle(Base):
     description: Mapped[str] = mapped_column()
     map_photo_id: Mapped[str] = mapped_column(nullable=True)
     equipment_text: Mapped[str] = mapped_column(nullable=True)
+    map_media_type: Mapped[str] = mapped_column(nullable=True)  # photo | animation
+
+
+class Fine(Base):
+    __tablename__ = 'fines'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    description: Mapped[str] = mapped_column()
+    cost: Mapped[float] = mapped_column(default=0.0)
+    status: Mapped[str] = mapped_column(default='active')  # active | paid | removed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    closed_by = mapped_column(BigInteger, nullable=True)  # tg_id админа, снявшего штраф
+    paid_with: Mapped[str] = mapped_column(nullable=True)  # cadrs | stars
+    stars_amount: Mapped[int] = mapped_column(nullable=True)
+    charge_id: Mapped[str] = mapped_column(nullable=True)  # telegram_payment_charge_id
+
+
+class TrainingTest(Base):
+    __tablename__ = 'tests'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column()
+    cost: Mapped[float] = mapped_column(default=0.0)
+
+
+class TrainingQuestion(Base):
+    __tablename__ = 'test_questions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column()
+    text: Mapped[str] = mapped_column()
+    option_1: Mapped[str] = mapped_column()
+    option_2: Mapped[str] = mapped_column()
+    option_3: Mapped[str] = mapped_column()
+    option_4: Mapped[str] = mapped_column()
+    correct: Mapped[int] = mapped_column()  # 1..4
+
+
+class TrainingAttempt(Base):
+    __tablename__ = 'test_attempts'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    test_id: Mapped[int] = mapped_column(ForeignKey('tests.id', ondelete="CASCADE"))
+    correct_count: Mapped[int] = mapped_column()
+    total: Mapped[int] = mapped_column()
+    passed: Mapped[bool] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 async def async_main():
+    from database.migrate import migrate
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(migrate)
