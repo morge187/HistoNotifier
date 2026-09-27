@@ -1,7 +1,7 @@
 """Матч-штрафы: выдача, снятие, оплата. Записи не удаляются — это история."""
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from database.models import Fine, User, UserEvent, async_session
 
@@ -74,20 +74,28 @@ async def pay_fine_with_cadrs(fine_id: int, user_id: int) -> str:
             return "not_active"
         if not fine.cost:
             return "free"
-        user = await session.get(User, user_id)
-        if (user.points or 0) < fine.cost:
-            return "no_points"
 
         # Условный UPDATE защищает от двойного нажатия: второй запрос не найдёт active
-        result = await session.execute(
+        fine_result = await session.execute(
             update(Fine)
             .where(Fine.id == fine_id, Fine.status == "active")
             .values(status="paid", paid_with="cadrs", closed_at=datetime.now())
         )
-        if result.rowcount != 1:
+        if fine_result.rowcount != 1:
             await session.rollback()
             return "not_active"
-        user.points = round((user.points or 0) - fine.cost, 2)
+
+        # Условный UPDATE списывает баллы атомарно в той же транзакции:
+        # защищает от гонки двух одновременных оплат разных штрафов одним юзером.
+        points_result = await session.execute(
+            update(User)
+            .where(User.id == user_id, User.points >= fine.cost)
+            .values(points=func.round(User.points - fine.cost, 2))
+        )
+        if points_result.rowcount != 1:
+            await session.rollback()
+            return "no_points"
+
         await session.commit()
         return "ok"
 

@@ -52,6 +52,19 @@ def test_pay_with_cadrs_errors(make_user):
     assert run(f.get_fine(costly.id)).status == "active"
 
 
+def test_pay_with_cadrs_debit_is_conditional_on_current_balance(make_user):
+    """Списание баллов — условный UPDATE в той же транзакции, что и статус штрафа:
+    вторая оплата не может списать баллы, которых уже не осталось после первой."""
+    uid = make_user(points=5)
+    first = run(f.add_fine(uid, "a", 3))
+    second = run(f.add_fine(uid, "b", 3))
+    assert run(f.pay_fine_with_cadrs(first.id, uid)) == "ok"
+    assert run(f.pay_fine_with_cadrs(second.id, uid)) == "no_points"
+    from database.requests import get_user_by_id
+    assert run(get_user_by_id(uid)).points == 2
+    assert run(f.get_fine(second.id)).status == "active"
+
+
 def test_mark_paid_stars_once(make_user):
     uid = make_user()
     fine = run(f.add_fine(uid, "x", 2))
