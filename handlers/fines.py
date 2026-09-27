@@ -1,5 +1,6 @@
 """Матч-штрафы: поиск игроков, карточка игрока для админа, штрафы и очки."""
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -148,6 +149,20 @@ async def deny_non_admin(message: Message, state: FSMContext) -> bool:
     return True
 
 
+async def safe_edit(message: Message, text: str, reply_markup=None):
+    """edit_text, но повторный тап по устаревшей кнопке не должен ронять хендлер.
+
+    Telegram отвечает `TelegramBadRequest: message is not modified`, если текст
+    и клавиатура не изменились (двойной тап, тап по старой клавиатуре). Это
+    штатная ситуация — проглатываем именно её, всё остальное — наружу.
+    """
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
+
+
 # ---------- Entry ----------
 
 @fines_router.message(F.text.in_(FINES_BUTTONS))
@@ -159,7 +174,7 @@ async def fine_entry(message: Message, state: FSMContext):
 @fines_router.callback_query(BackCb.filter(F.target == "to_main"))
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("режим поиска", reply_markup=kb_search_menu())
+    await safe_edit(callback.message, "режим поиска", kb_search_menu())
     await callback.answer()
 
 
@@ -318,18 +333,19 @@ async def admin_buttons(callback: CallbackQuery, callback_data: FineAdminCb, sta
     action = callback_data.action
 
     if action == "card":
-        await callback.message.edit_text(await render_admin_user(user), reply_markup=kb_admin_user_actions(user))
         await callback.answer()
+        await safe_edit(callback.message, await render_admin_user(user), kb_admin_user_actions(user))
         return
 
     if action == "points_zero":
         await reset_user_points(user.id)
         user = await get_user_by_id(user.id)
-        await callback.message.edit_text(
-            "✅ Очки обнулены.\n\n" + await render_admin_user(user),
-            reply_markup=kb_admin_user_actions(user),
-        )
         await callback.answer()
+        await safe_edit(
+            callback.message,
+            "✅ Очки обнулены.\n\n" + await render_admin_user(user),
+            kb_admin_user_actions(user),
+        )
         return
 
     if action in ("points_set", "points_dec"):
@@ -374,7 +390,7 @@ async def fine_remove(callback: CallbackQuery, callback_data: FineRemoveCb):
     if not user:
         return
     fines = await get_active_fines(user.id)
-    await callback.message.edit_text(render_fines_list(user, fines), reply_markup=kb_fines_list(user.id, fines))
+    await safe_edit(callback.message, render_fines_list(user, fines), kb_fines_list(user.id, fines))
 
 
 # ---------- Admin: points set/dec apply ----------
