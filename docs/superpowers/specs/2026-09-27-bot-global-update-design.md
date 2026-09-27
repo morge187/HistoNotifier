@@ -20,7 +20,10 @@
 | `database/migrate.py` | Добавление недостающих колонок и перенос старых штрафов при старте |
 | `middlewares/ban.py` | Проверка блокировки для сообщений и callback-запросов |
 | `handlers/fines.py` | Код матч-штрафов (переезд из `handlers/admin.py`) + снятие, блокировка, разблокировка, статус наград |
-| `handlers/cabinet.py` | Личный кабинет, оплата штрафов (кадры и Stars) |
+| `database/fines.py` | Запросы к таблице `fines` |
+| `database/training.py` | Запросы к тестам, вопросам и попыткам |
+| `handlers/fine_payment.py` | Оплата штрафов (кадры и Stars) |
+| `handlers/cabinet.py` | Личный кабинет (кнопка оплаты ведёт в `fine_payment`) |
 | `handlers/training.py` | Раздел «Обучение» для пользователя |
 | `handlers/admin_training.py` | Конструктор тестов для админа |
 | `tests/` | pytest для чистых функций |
