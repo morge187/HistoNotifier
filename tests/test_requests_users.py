@@ -14,3 +14,18 @@ def test_new_user_is_not_onboarded(db):
     user = asyncio.run(r.get_user(200))
     assert user.onboarded is False
     assert user.is_banned is False
+
+
+def test_set_banned(make_user):
+    uid = make_user(tg_id=300)
+    assert asyncio.run(r.set_banned(uid, True)) is True
+    assert asyncio.run(r.get_user(300)).is_banned is True
+    asyncio.run(r.set_banned(uid, False))
+    assert asyncio.run(r.get_user(300)).is_banned is False
+    assert asyncio.run(r.set_banned(9999, True)) is False
+
+
+def test_get_admin_tg_ids(make_user):
+    make_user(name="adm", tg_id=1, status="admin")
+    make_user(name="usr", tg_id=2)
+    assert asyncio.run(r.get_admin_tg_ids()) == [1]

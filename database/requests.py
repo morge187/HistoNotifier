@@ -739,6 +739,22 @@ async def get_user_by_id(user_id: int):
         return await session.scalar(select(User).where(User.id == user_id))
 
 
+async def set_banned(user_id: int, banned: bool) -> bool:
+    async with async_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            return False
+        user.is_banned = banned
+        await session.commit()
+        return True
+
+
+async def get_admin_tg_ids() -> list:
+    async with async_session() as session:
+        result = await session.scalars(select(User.tg_id).where(User.status == "admin"))
+        return list(result.all())
+
+
 # ── Battles ──────────────────────────────────────────────────────────────────
 
 async def create_battle(
