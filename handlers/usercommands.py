@@ -102,7 +102,7 @@ async def chacge_name(message: Message, state: FSMContext):
 
         "👁 <b>НАБЛЮДАТЕЛИ:</b>\n"
         "• Просмотр разрешён:\n"
-        "  - Участникам клана [Т-70В]\n"
+        "  - Участникам кланов [Т-70В] и [RENWA]\n"
         "  - Проверенным лицам\n"
         "  - Подписчикам канала TCF\n\n"
         "⚠️ <b>Обязанности наблюдателей:</b>\n"
@@ -115,10 +115,10 @@ async def chacge_name(message: Message, state: FSMContext):
 @user.message(Command('menu'))
 async def menu(message: Message):
     user = await get_user(message.from_user.id)
-    if user.status == 'admin':
-        await message.answer('меню', reply_markup=adminboard)
-    else:
-        await message.answer('меню`', reply_markup=userboard)
+    if not user or not user.name:
+        await message.answer('Сначала зарегистрируйся: /start')
+        return
+    await message.answer('Меню', reply_markup=adminboard if user.status == 'admin' else userboard)
 
 @user.message(F.text == "Мои кадры")
 @user.message(Command("my_cadrs"))

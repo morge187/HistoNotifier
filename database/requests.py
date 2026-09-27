@@ -15,11 +15,18 @@ async def get_user(tg_id):
 async def set_name_user(tg_id, name):
     async with async_session() as session: # Открываем асинхронную сессию
         user = await session.scalar(select(User).where(User.tg_id == tg_id)) # Запомните, что scalar может быть и scalars в мн. числе
-        
+
         user.name = name
         await session.commit() # Сохраняем изменения в базе данных
 
         return user
+
+async def set_onboarded(tg_id):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == tg_id))
+        if user:
+            user.onboarded = True
+            await session.commit()
 
 async def set_user(tg_id): # Асинхронная функция для работы с пользователем
     async with async_session() as session: # Открываем асинхронную сессию
