@@ -2,7 +2,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import CommandStart, Command
 from aiogram import Router
 from aiogram import F
-from keyboards import userboard, adminboard
+from aiogram.dispatcher.event.bases import SkipHandler
+from keyboards import userboard, adminboard, is_menu_input
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from database.requests import set_user, set_status, set_name_user, get_user, check_name_exists, set_onboarded
@@ -41,6 +42,9 @@ async def start_command(message: Message, state: FSMContext):
     if data.name is not None:
         if not data.onboarded:
             await send_welcome(message)
+        else:
+            # Уже зарегистрирован — просто показываем актуальное меню
+            await message.answer("Меню", reply_markup=await board_for(message.from_user.id))
         return
 
     await set_status(message.from_user.id, 'base_user') # задать статут обчного юзера
@@ -66,6 +70,13 @@ async def set_name_to_user(message: Message, state: FSMContext):
         return
 
     new_nick = ' '.join(message.text.split())
+
+    # Команда или кнопка меню — выходим из смены ника и отдаём событие дальше.
+    # FSM-состояние aiogram уже вычислил для апдейта, поэтому хендлеры без
+    # фильтра состояния после SkipHandler сработают как обычно.
+    if is_menu_input(new_nick):
+        await state.clear()
+        raise SkipHandler()
 
     # Отмену ловим здесь: пока активно состояние Name.name,
     # до общего обработчика cancel_accept сообщение не доходит

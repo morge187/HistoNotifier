@@ -15,7 +15,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.requests import get_tank_by_id, get_tank_years, search_tanks_by_name
-from keyboards import adminboard, userboard
+from keyboards import is_menu_input
 
 search_router = Router(name="search")
 
@@ -23,15 +23,6 @@ SEARCH_BUTTON = "🔍 Поиск"
 MAX_RESULTS = 25
 MAX_CARD_LEN = 3900  # запас до лимита Telegram в 4096 символов
 CANCEL_WORDS = {"отмена", "отменить", "стоп", "cancel", "выход"}
-
-# Тексты кнопок обычной клавиатуры. Если в режиме поиска нажата любая из них,
-# поиск закрывается, а нажатие обрабатывает «родной» хендлер (SkipHandler).
-MENU_BUTTONS = {
-    button.text
-    for board in (userboard, adminboard)
-    for row in board.keyboard
-    for button in row
-}
 
 PROMPT = (
     "🔍 <b>Поиск техники</b>\n\n"
@@ -160,7 +151,7 @@ async def process_search_query(message: Message, state: FSMContext):
         return
 
     # Команда или кнопка меню — выходим из поиска и отдаём событие дальше
-    if text.startswith("/") or text in MENU_BUTTONS:
+    if is_menu_input(text):
         await state.clear()
         raise SkipHandler()
 
