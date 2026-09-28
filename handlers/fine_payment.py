@@ -1,4 +1,5 @@
 """Оплата матч-штрафов: кадрами или Telegram Stars (1 кадр = 5 ⭐)."""
+import logging
 from aiogram import Router, F
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters.callback_data import CallbackData
@@ -8,6 +9,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.fines import get_active_fines, get_fine, mark_fine_paid_stars, pay_fine_with_cadrs
 from database.requests import get_admin_tg_ids, get_user
 from utils import fine_payload, fine_stars, fmt_points, parse_fine_payload
+
+logger = logging.getLogger(__name__)
 
 fine_payment_router = Router()
 
@@ -88,8 +91,8 @@ async def pay_cadrs(callback: CallbackQuery, callback_data: FinePayCb):
     if result != "ok":
         await callback.answer(CADRS_RESULT_TEXT[result], show_alert=True)
         return
-    await callback.message.edit_text(f"✅ Штраф оплачен. Списано {fmt_points(fine.cost)} кадров.")
-    await callback.answer()
+    await callback.answer("✅ Штраф оплачен")
+    await callback.message.answer(f"✅ Штраф оплачен. Списано {fmt_points(fine.cost)} кадров.")
 
 
 @fine_payment_router.callback_query(FinePayCb.filter(F.action == "stars"))
@@ -110,20 +113,24 @@ async def pay_stars(callback: CallbackQuery, callback_data: FinePayCb):
 
 @fine_payment_router.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
-    parsed = parse_fine_payload(query.invoice_payload)
-    user = await get_user(query.from_user.id)
-    fine = await get_fine(parsed[0]) if parsed else None
-    ok = bool(
-        parsed and user and fine
-        and fine.user_id == user.id == parsed[1]
-        and fine.status == "active" and fine.cost
-        and query.currency == STARS_CURRENCY
-        and query.total_amount == fine_stars(fine.cost)
-    )
-    if ok:
-        await query.answer(ok=True)
-    else:
-        await query.answer(ok=False, error_message="Штраф уже закрыт или изменился. Открой личный кабинет заново.")
+    try:
+        parsed = parse_fine_payload(query.invoice_payload)
+        user = await get_user(query.from_user.id)
+        fine = await get_fine(parsed[0]) if parsed else None
+        ok = bool(
+            parsed and user and fine
+            and fine.user_id == user.id == parsed[1]
+            and fine.status == "active" and fine.cost
+            and query.currency == STARS_CURRENCY
+            and query.total_amount == fine_stars(fine.cost)
+        )
+        if ok:
+            await query.answer(ok=True)
+        else:
+            await query.answer(ok=False, error_message="Штраф уже закрыт или изменился. Открой личный кабинет заново.")
+    except Exception:
+        logger.exception("pre_checkout validation error")
+        await query.answer(ok=False, error_message="Не удалось проверить штраф. Попробуйте позже.")
 
 
 @fine_payment_router.message(F.successful_payment)

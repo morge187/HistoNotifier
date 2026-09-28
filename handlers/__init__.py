@@ -29,14 +29,16 @@ admin_router.include_router(admin_training)
 # ── Пользовательский роутер ──────────────────────────────────────────────────
 user_router = Router(name="user")
 user_router.include_router(user)
-user_router.include_router(fine_payment_router)
 user_router.include_router(training_router)
 user_router.include_router(events_router)
 user_router.include_router(reward_router)
 user_router.include_router(battles_router)
 
-# search_router идёт первым: кнопка «🔍 Поиск» должна срабатывать из любого
+# fine_payment_router идёт первым: обработчик successful_payment должен перехватить
+# Telegram update до других state-фильтрованных handlers, иначе звёзды могут быть
+# потеряны (роутеры ниже имеют FSM-состояния, которые поглощают Message updates).
+# search_router идёт вторым: кнопка «🔍 Поиск» должна срабатывать из любого
 # состояния, а свои состояния он при необходимости отдаёт дальше (SkipHandler).
-handlers = [search_router, main_router, admin_router, user_router]
+handlers = [fine_payment_router, search_router, main_router, admin_router, user_router]
 
 __all__ = ["handlers"]

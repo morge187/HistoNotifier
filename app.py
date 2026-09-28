@@ -14,7 +14,7 @@ async def main():
     dp = Dispatcher()
     dp.message.outer_middleware(BanMiddleware())
     dp.callback_query.outer_middleware(BanMiddleware())
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(drop_pending_updates=False)
     for router in handlers:
         dp.include_router(router)
     dp.startup.register(startup) 
