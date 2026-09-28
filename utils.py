@@ -175,3 +175,33 @@ def start_decision(passed: bool, last_fail_at, points, cost, now):
 
 def fmt_cost(cost) -> str:
     return "бесплатно" if not cost else f"{fmt_points(cost)} кадров"
+
+
+# ── Личный кабинет ───────────────────────────────────────────────────────────
+
+def render_cabinet(name, points, rewards, tests, fines) -> str:
+    """rewards/tests — [(название, выдан/пройден)], fines — [(описание, стоимость)]."""
+    emoji, _ = cadr_tier(points)
+    lines = [f"👤 Ник: {name}", f"🎞 Кадры: {fmt_points(points)} {emoji}".rstrip(), ""]
+
+    if rewards:
+        lines.append("🎁 Награды:")
+        lines += [f" • {title} — {'выдан ✅' if ok else 'не выдан ❌'}" for title, ok in rewards]
+    else:
+        lines.append("🎁 Награды: нет")
+    lines.append("")
+
+    if tests:
+        lines.append("📚 Тесты:")
+        lines += [f" • {title} — {'пройден 🟢' if ok else 'не пройден 🔴'}" for title, ok in tests]
+    else:
+        lines.append("📚 Тесты: нет тестов")
+    lines.append("")
+
+    if fines:
+        lines.append("⚠️ Штрафы:")
+        lines += [f" {i}. {desc}" + (f" — {fmt_points(cost)} кадров" if cost else "")
+                  for i, (desc, cost) in enumerate(fines, start=1)]
+    else:
+        lines.append("⚠️ Штрафы: нет")
+    return "\n".join(lines)

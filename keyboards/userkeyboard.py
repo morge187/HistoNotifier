@@ -1,22 +1,17 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
-userboard = ReplyKeyboardMarkup(keyboard=[
-    [
-        KeyboardButton(text='Список наград'),
-        KeyboardButton(text='Мои кадры'),
-        KeyboardButton(text='Правила')
-    ],
-    [
-        KeyboardButton(text='Поменять имя'),
-        KeyboardButton(text='Мои награды')
-    ],
-    [
-        KeyboardButton(text='Список ивентов'),
-        KeyboardButton(text='Список танков'),
-        KeyboardButton(text='матч-штрафы')
-    ],
-    [
-        KeyboardButton(text='Список сражений'),
-        KeyboardButton(text='🔍 Поиск')
+
+def user_rows(with_training: bool = False) -> list:
+    """Основные кнопки пользователя (3×3). Кнопка «Обучение» появится вместе с разделом."""
+    middle = [KeyboardButton(text='Матч-штрафы')]
+    if with_training:
+        middle.append(KeyboardButton(text='Обучение'))
+    middle.append(KeyboardButton(text='Награды'))
+    return [
+        [KeyboardButton(text='Личный кабинет'), KeyboardButton(text='Правила'), KeyboardButton(text='🔍 Поиск')],
+        middle,
+        [KeyboardButton(text='Список танков'), KeyboardButton(text='Список сражений'), KeyboardButton(text='Список ивентов')],
     ]
-], resize_keyboard=True)
+
+
+userboard = ReplyKeyboardMarkup(keyboard=user_rows(with_training=True), resize_keyboard=True)
