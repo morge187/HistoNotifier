@@ -110,3 +110,11 @@ async def mark_fine_paid_stars(fine_id: int, stars: int, charge_id: str) -> bool
         )
         await session.commit()
         return result.rowcount == 1
+
+
+async def is_fine_paid_with_charge(fine_id: int, charge_id: str) -> bool:
+    """Штраф уже оплачен звёздами именно этим платежом (повторная доставка update)."""
+    if not charge_id:
+        return False
+    fine = await get_fine(fine_id)
+    return bool(fine and fine.status == "paid" and fine.charge_id == charge_id)

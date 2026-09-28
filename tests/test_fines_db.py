@@ -94,3 +94,14 @@ def test_users_with_active_fines_grouped_and_by_event(db, make_user):
     run(join_event())
     rows = run(f.get_users_with_active_fines(event_id=7))
     assert [(u.name, len(fs)) for u, fs in rows] == [("Бета", 2)]
+
+
+def test_is_fine_paid_with_charge(make_user):
+    uid = make_user()
+    fine = run(f.add_fine(uid, "x", 2))
+    assert run(f.is_fine_paid_with_charge(fine.id, "ch_1")) is False  # ещё активен
+    run(f.mark_fine_paid_stars(fine.id, 10, "ch_1"))
+    assert run(f.is_fine_paid_with_charge(fine.id, "ch_1")) is True
+    assert run(f.is_fine_paid_with_charge(fine.id, "ch_2")) is False
+    assert run(f.is_fine_paid_with_charge(fine.id, "")) is False
+    assert run(f.is_fine_paid_with_charge(9999, "ch_1")) is False
