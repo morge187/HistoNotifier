@@ -451,6 +451,9 @@ async def process_reward_to_delete(message: Message, state: FSMContext):
 
 @reward_router.callback_query(F.data.startswith("confirm_delete_reward_"))
 async def confirm_reward_deletion(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
     reward_id = int(callback.data.split("_")[3])
     
     success = await delete_reward(reward_id)

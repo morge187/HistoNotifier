@@ -5,7 +5,7 @@ from aiogram.types import Message, ContentType, InlineKeyboardButton, CallbackQu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from keyboards import adminboard
-from database.requests import get_user, create_battle, get_all_fronts, get_battles_by_front, get_battle_by_id, delete_battle
+from database.requests import get_user, create_battle, get_all_fronts, get_battles_by_front, get_battle_by_id, delete_battle, is_admin
 
 admin_battles = Router()
 
@@ -277,6 +277,9 @@ async def delete_choose_battle(message: Message, state: FSMContext):
 
 @admin_battles.callback_query(F.data.startswith("del_battle_yes_"))
 async def confirm_delete_battle(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
     battle_id = int(callback.data.split("_")[-1])
     success = await delete_battle(battle_id)
     data = await state.get_data()

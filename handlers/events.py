@@ -15,7 +15,7 @@ from database.requests import (
     get_user, get_future_events, get_event_by_id,
     add_user_to_event, get_event_participants, update_user_points,
     get_all_events, delete_event_by_id, get_events,
-    create_event, get_all_users, get_last_event_id
+    create_event, get_all_users, get_last_event_id, is_admin
 )
 from utils import fmt_points
 
@@ -170,6 +170,9 @@ async def process_participation(callback: CallbackQuery):
 
 @events_router.callback_query(F.data.startswith("accept_all:"))
 async def accept_all_participants(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
     event_id = int(callback.data.split(":")[1])
     event = await get_event_by_id(event_id)
     participants = await get_event_participants(event_id)
@@ -197,6 +200,9 @@ async def accept_all_participants(callback: CallbackQuery):
 
 @events_router.callback_query(F.data.startswith("accept_nums:"))
 async def accept_by_numbers(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
     event_id = int(callback.data.split(":")[1])
     event = await get_event_by_id(event_id)
     participants = await get_event_participants(event_id)
@@ -347,6 +353,9 @@ async def process_event_deletion(message: Message, state: FSMContext):
 
 @events_router.callback_query(F.data.startswith("confirm_delete:"))
 async def confirm_event_deletion(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
     event_id = int(callback.data.split(":")[1])
     success = await delete_event_by_id(event_id)
 
