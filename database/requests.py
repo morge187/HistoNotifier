@@ -18,6 +18,7 @@ async def set_name_user(tg_id, name):
 
         user.name = name
         await session.commit() # Сохраняем изменения в базе данных
+        await session.refresh(user) # после commit объект истёк — подгружаем, пока сессия открыта
 
         return user
 
@@ -60,6 +61,7 @@ async def save_event(data: dict):
         )
         session.add(event)
         await session.commit()
+        await session.refresh(event)  # после commit объект истёк — подгружаем, пока сессия открыта
         return event
     
 
@@ -87,6 +89,7 @@ async def create_event(name: str, time, cost: int, discription: str, photo_id: i
         )
         session.add(event)
         await session.commit()
+        await session.refresh(event)  # после commit объект истёк — подгружаем, пока сессия открыта
         return event
 
 
@@ -357,8 +360,12 @@ async def toggle_reward_issued(user_reward_id: int):
         issued = ur.issued
         reward = await session.get(Reward, ur.reward_id)
         owner = await session.get(User, ur.user_id)
+        # Читаем до commit: после него объекты истекают (expire_on_commit), а
+        # ленивая подгрузка в async-сессии падает с MissingGreenlet.
+        owner_tg_id = owner.tg_id if owner else None
+        reward_name = reward.name if reward else "Награда"
         await session.commit()
-        return issued, (owner.tg_id if owner else None), (reward.name if reward else "Награда")
+        return issued, owner_tg_id, reward_name
 
 async def is_admin(user_id: int) -> bool:
     user = await get_user(user_id)

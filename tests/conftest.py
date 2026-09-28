@@ -15,7 +15,7 @@ DB_MODULES = ("database.requests", "database.fines", "database.training")
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}", poolclass=NullPool)
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    session_maker = async_sessionmaker(engine)
 
     async def init():
         async with engine.begin() as conn:
@@ -39,7 +39,10 @@ def make_user(db):
             async with db() as session:
                 user = User(name=name, tg_id=tg_id, status=status, points=points, **extra)
                 session.add(user)
+                await session.flush()
+                # id читаем до commit: после него объект истекает (как в проде)
+                user_id = user.id
                 await session.commit()
-                return user.id
+                return user_id
         return asyncio.run(go())
     return _make

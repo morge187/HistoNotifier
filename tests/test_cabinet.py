@@ -42,8 +42,9 @@ def test_get_test_statuses(db, make_user):
                 TrainingAttempt(user_id=uid, test_id=a.id, correct_count=5, total=5, passed=True),
                 TrainingAttempt(user_id=uid, test_id=b.id, correct_count=0, total=5, passed=False),
             ])
+            ids = a.id, b.id
             await session.commit()
-            return a.id, b.id
+            return ids
 
     a_id, b_id = asyncio.run(seed())
     assert asyncio.run(t.get_test_statuses(uid)) == [(a_id, "А", True), (b_id, "Б", False)]

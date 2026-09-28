@@ -36,10 +36,11 @@ async def create_test(title: str, cost: float, questions: list) -> int:
         test = TrainingTest(title=title, cost=round(float(cost), 2))
         session.add(test)
         await session.flush()
+        test_id = test.id  # до commit: после него объект истекает
         for position, q in enumerate(questions, start=1):
-            session.add(TrainingQuestion(test_id=test.id, position=position, **_question_columns(q)))
+            session.add(TrainingQuestion(test_id=test_id, position=position, **_question_columns(q)))
         await session.commit()
-        return test.id
+        return test_id
 
 
 async def get_tests_with_counts() -> list:

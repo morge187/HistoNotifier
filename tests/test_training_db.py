@@ -74,3 +74,13 @@ def test_charge_points(make_user):
     assert run(t.charge_points(uid, 6)) is False
     assert run(t.charge_points(uid, 2.5)) is True
     assert run(get_user_by_id(uid)).points == 2.5
+
+
+def test_create_test_returns_id_under_production_session(db):
+    # Регрессия: create_test читал test.id после commit — при expire_on_commit=True
+    # (как в проде) это ленивая подгрузка в async-сессии -> MissingGreenlet.
+    from database.models import async_session as prod_session
+    assert db.kw.get("expire_on_commit", True) == prod_session.kw.get("expire_on_commit", True) is True
+    test_id = run(t.create_test("Регрессия", 1, [q(1)]))
+    assert isinstance(test_id, int)
+    assert run(t.get_test(test_id)).title == "Регрессия"
