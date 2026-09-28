@@ -19,6 +19,7 @@ from database.requests import (
     get_user_rewards_with_status,
     is_admin,
     reset_user_points,
+    set_banned,
     set_user_points_value,
     toggle_reward_issued,
 )
@@ -37,13 +38,19 @@ class FineMenuCb(CallbackData, prefix="fine_menu"):
 
 
 class FineAdminCb(CallbackData, prefix="fine_adm"):
-    action: str  # card | points_zero | points_set | points_dec | fine_add | fines_list | rewards_list
+    action: str  # card | points_zero | points_set | points_dec | fine_add | fines_list | rewards_list | ban | unban
     user_id: int
 
 
 class FineRemoveCb(CallbackData, prefix="fine_rm"):
     fine_id: int
     user_id: int
+
+
+class BanMsgCb(CallbackData, prefix="ban_msg"):
+    user_id: int
+    ban: bool
+    with_msg: bool
 
 
 class BackCb(CallbackData, prefix="back"):
@@ -65,6 +72,7 @@ class FineStates(StatesGroup):
     wait_points_dec_value = State()
     wait_fine_text = State()
     wait_fine_cost = State()
+    wait_ban_message = State()
 
 
 # ---------- Render ----------
@@ -137,6 +145,10 @@ def kb_admin_user_actions(user):
         ("Награды игрока", "rewards_list"),
     ):
         kb.button(text=text, callback_data=FineAdminCb(action=action, user_id=user.id).pack())
+    if user.is_banned:
+        kb.button(text="Разблокировать", callback_data=FineAdminCb(action="unban", user_id=user.id).pack())
+    else:
+        kb.button(text="Заблокировать 🚫", callback_data=FineAdminCb(action="ban", user_id=user.id).pack())
     kb.button(text="Назад", callback_data=BackCb(target="to_main").pack())
     kb.adjust(1)
     return kb.as_markup()
@@ -403,6 +415,19 @@ async def admin_buttons(callback: CallbackQuery, callback_data: FineAdminCb, sta
         await callback.answer()
         return
 
+    if action in ("ban", "unban"):
+        ban = action == "ban"
+        if ban and user.status == "admin":
+            await callback.answer("Нельзя заблокировать администратора.", show_alert=True)
+            return
+        kb = InlineKeyboardBuilder()
+        kb.button(text="Да", callback_data=BanMsgCb(user_id=user.id, ban=ban, with_msg=True).pack())
+        kb.button(text="Нет", callback_data=BanMsgCb(user_id=user.id, ban=ban, with_msg=False).pack())
+        kb.adjust(2)
+        await callback.message.answer("Хотите ли вы оставить сообщение пользователю?", reply_markup=kb.as_markup())
+        await callback.answer()
+        return
+
     await callback.answer("Неизвестное действие.", show_alert=True)
 
 
@@ -522,3 +547,59 @@ async def reward_toggle(callback: CallbackQuery, callback_data: RewardToggleCb):
     if user:
         items = await get_user_rewards_with_status(user.id)
         await safe_edit(callback.message, render_rewards_list(user, items), kb_rewards_list(user.id, items))
+
+
+# ---------- Admin: ban / unban ----------
+
+async def apply_ban(admin_message: Message, user_id: int, ban: bool, text: str = None):
+    user = await get_user_by_id(user_id)
+    if not user:
+        await admin_message.answer("Игрок не найден.")
+        return
+
+    await set_banned(user.id, ban)
+    report = f"✅ {user.name} {'заблокирован' if ban else 'разблокирован'}."
+    if text is None:
+        report += " Без уведомления."
+    else:
+        header = "🚫 Вы заблокированы." if ban else "✅ Вы разблокированы."
+        try:
+            await admin_message.bot.send_message(user.tg_id, f"{header}\n\n{text}")
+        except TelegramAPIError:
+            report += "\n⚠️ Уведомление не доставлено (пользователь остановил бота)."
+
+    user = await get_user_by_id(user.id)
+    await send_admin_card(admin_message, user, report + "\n\n")
+
+
+@fines_router.callback_query(BanMsgCb.filter())
+async def ban_message_choice(callback: CallbackQuery, callback_data: BanMsgCb, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Доступно только администратору.", show_alert=True)
+        return
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
+    await callback.answer()
+    if callback_data.with_msg:
+        await state.set_state(FineStates.wait_ban_message)
+        await state.update_data(target_user_id=callback_data.user_id, ban=callback_data.ban)
+        await callback.message.answer("Введите сообщение")
+        return
+    await apply_ban(callback.message, callback_data.user_id, callback_data.ban)
+
+
+@fines_router.message(FineStates.wait_ban_message)
+async def ban_message_apply(message: Message, state: FSMContext):
+    if await deny_non_admin(message, state):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Сообщение не может быть пустым. Введите текст:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    await apply_ban(message, data["target_user_id"], data["ban"], text)

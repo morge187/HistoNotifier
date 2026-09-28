@@ -7,10 +7,13 @@ load_dotenv()
 
 from aiogram import Bot, Dispatcher
 from database.models import async_main
+from middlewares import BanMiddleware
 
 async def main():
     bot = Bot(token=os.getenv('TOKEN'))
     dp = Dispatcher()
+    dp.message.outer_middleware(BanMiddleware())
+    dp.callback_query.outer_middleware(BanMiddleware())
     await bot.delete_webhook(drop_pending_updates=True)
     for router in handlers:
         dp.include_router(router)

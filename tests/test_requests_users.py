@@ -42,3 +42,18 @@ def test_reward_status_toggle(db, make_user):
     assert asyncio.run(r.toggle_reward_issued(ur_id)) == (True, 400, "Камуфляж №1")
     assert asyncio.run(r.toggle_reward_issued(ur_id)) == (False, 400, "Камуфляж №1")
     assert asyncio.run(r.toggle_reward_issued(9999)) is None
+
+
+def test_set_banned(make_user):
+    uid = make_user(tg_id=300)
+    assert asyncio.run(r.set_banned(uid, True)) is True
+    assert asyncio.run(r.get_user(300)).is_banned is True
+    asyncio.run(r.set_banned(uid, False))
+    assert asyncio.run(r.get_user(300)).is_banned is False
+    assert asyncio.run(r.set_banned(9999, True)) is False
+
+
+def test_get_admin_tg_ids(make_user):
+    make_user(name="adm", tg_id=1, status="admin")
+    make_user(name="usr", tg_id=2)
+    assert asyncio.run(r.get_admin_tg_ids()) == [1]
