@@ -6,8 +6,11 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database.fines import get_active_fines, get_fine, mark_fine_paid_stars, pay_fine_with_cadrs
+from database.fines import (
+    get_active_fines, get_fine, is_fine_paid_with_charge, mark_fine_paid_stars, pay_fine_with_cadrs,
+)
 from database.requests import get_admin_tg_ids, get_user
+from handlers.common import safe_answer
 from utils import fine_payload, fine_stars, fmt_points, parse_fine_payload
 
 logger = logging.getLogger(__name__)
@@ -91,7 +94,7 @@ async def pay_cadrs(callback: CallbackQuery, callback_data: FinePayCb):
     if result != "ok":
         await callback.answer(CADRS_RESULT_TEXT[result], show_alert=True)
         return
-    await callback.answer("✅ Штраф оплачен")
+    await safe_answer(callback, "✅ Штраф оплачен")  # кадры уже списаны
     await callback.message.answer(f"✅ Штраф оплачен. Списано {fmt_points(fine.cost)} кадров.")
 
 
@@ -138,7 +141,11 @@ async def successful_payment(message: Message):
     payment = message.successful_payment
     parsed = parse_fine_payload(payment.invoice_payload)
     fine_id = parsed[0] if parsed else 0
-    if parsed and await mark_fine_paid_stars(fine_id, payment.total_amount, payment.telegram_payment_charge_id):
+    charge_id = payment.telegram_payment_charge_id
+    # Повторная доставка того же платежа: штраф уже закрыт именно этим charge_id —
+    # это успех, а не «оплата за закрытый штраф».
+    if parsed and (await mark_fine_paid_stars(fine_id, payment.total_amount, charge_id)
+                   or await is_fine_paid_with_charge(fine_id, charge_id)):
         await message.answer(f"✅ Штраф оплачен: {payment.total_amount} ⭐. Спасибо!")
         return
 

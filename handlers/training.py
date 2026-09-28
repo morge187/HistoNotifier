@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.requests import get_user
+from handlers.common import safe_answer
 from database.training import (
     charge_points, get_questions, get_test, get_test_statuses, get_tests_with_counts,
     has_passed, last_failed_at, question_to_dict, record_attempt,
@@ -150,7 +151,8 @@ async def training_start(callback: CallbackQuery, callback_data: TrainCb, state:
         await state.clear()
         raise
 
-    await callback.answer()
+    # Кадры уже списаны: протухший callback не должен оборвать выдачу вопроса
+    await safe_answer(callback)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except TelegramBadRequest:
@@ -177,7 +179,7 @@ async def training_answer(callback: CallbackQuery, callback_data: TrainAnswerCb,
     data["tt_ok"] += int(callback_data.option == q["correct"])
     data["tt_i"] += 1
     await state.update_data(tt_i=data["tt_i"], tt_ok=data["tt_ok"])
-    await callback.answer()
+    await safe_answer(callback)  # индекс уже сдвинут — следующий вопрос отправить обязательно
     try:
         await callback.message.edit_text(f"{callback.message.text}\n\nТвой ответ: {callback_data.option}")
     except TelegramBadRequest:

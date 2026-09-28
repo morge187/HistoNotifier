@@ -146,3 +146,38 @@ def test_edit_text_failure_does_not_block_progress(db, make_user):
     ans_cb.answer.assert_called_once_with()  # callback отвечен несмотря на исключение
     ans_cb.message.answer.assert_called_once()  # следующий вопрос всё же отправлен
     assert run(state.get_data())["tt_i"] == 1
+
+
+TOO_OLD = TelegramBadRequest(method=None, message="Bad Request: query is too old and response timeout expired")
+
+
+def test_start_sends_question_when_callback_answer_fails(db, make_user):
+    """Final review #6: кадры списаны, а callback.answer() упал («query is too old») —
+    вопрос всё равно должен уйти, иначе оплаченная попытка потеряна."""
+    tg_id = 444
+    uid = make_user(tg_id=tg_id, points=5)
+    test_id = run(t.create_test("Тест", 2, [q(1)]))
+    state = make_state(tg_id)
+
+    callback = make_callback(tg_id)
+    callback.answer = AsyncMock(side_effect=TOO_OLD)
+    run(tr.training_start(callback, tr.TrainCb(action="start", test_id=test_id), state))
+
+    assert run(get_user_by_id(uid)).points == 3
+    callback.message.answer.assert_called_once()  # первый вопрос отправлен
+    assert run(state.get_state()) == tr.TrainStates.in_test.state
+
+
+def test_answer_sends_next_question_when_callback_answer_fails(db, make_user):
+    tg_id = 445
+    make_user(tg_id=tg_id, points=0)
+    test_id = run(t.create_test("Тест", 0, [q(1), q(2)]))
+    state = make_state(tg_id)
+    run(tr.training_start(make_callback(tg_id), tr.TrainCb(action="start", test_id=test_id), state))
+
+    ans_cb = make_callback(tg_id)
+    ans_cb.answer = AsyncMock(side_effect=TOO_OLD)
+    run(tr.training_answer(ans_cb, tr.TrainAnswerCb(test_id=test_id, index=0, option=1), state))
+
+    ans_cb.message.answer.assert_called_once()  # следующий вопрос отправлен
+    assert run(state.get_data())["tt_i"] == 1
